@@ -1,0 +1,23 @@
+{
+  "uid": "mcp-ops-kafka",
+  "title": "MCP Ops Kafka",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "tags": ["mcp-ops", "kafka"],
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Consumer lag",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "mcp_ops_kafka_consumer_lag",
+          "legendFormat": "{{topic}} {{consumer_group}}"
+        }
+      ]
+    }
+  ]
+}

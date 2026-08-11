@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: MCP Ops Dashboards
+    orgId: 1
+    folder: MCP Ops
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
