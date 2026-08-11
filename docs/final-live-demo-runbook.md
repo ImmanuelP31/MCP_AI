@@ -133,12 +133,14 @@ Then show:
 - Frontend tests/lint/typecheck/build: 9 tests passed, lint/typecheck/build passed.
 - Python lint/type/security: ruff passed, mypy passed on 154 source files, Bandit found no issues.
 - Docker Compose config: parsed successfully; local Docker config access emitted a sandbox warning.
-- GitHub read smoke: verified against `ImmanuelP31/MCP_AI`.
+- GitHub vertical-slice demo: live validated against `ImmanuelP31/MCP_AI`; issue
+  `https://github.com/ImmanuelP31/MCP_AI/issues/1` was created and an approval-gated workflow
+  rerun executed.
 - Repository-document RAG: 34 bounded repo docs/workflows ingested; controlled failing workflow was
   the top retrieved result for the demo query.
 - OpenSearch RAG: live validated with `index_backend: opensearch` using
   `OPENSEARCH_URL=http://localhost:9200`.
-- Controlled failing workflow: implemented locally; requires push before live dispatch.
+- Controlled failing workflow: pushed to `main` and dispatched successfully.
 - OpenAI live planner/embedding smoke: provider paths reached OpenAI but returned HTTP 401 with the
   configured key. Replace or rotate `OPENAI_API_KEY` before presenting live LLM or embedding
   metrics.

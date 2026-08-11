@@ -7,8 +7,9 @@ Generated during the final presentation-readiness pass.
 | Area | Status | Evidence |
 | --- | --- | --- |
 | GitHub token | Configured | `.env` contains a GitHub token; token value was not printed. |
-| GitHub read smoke | Live validated | `get_latest_failed_build` reached `ImmanuelP31/MCP_AI` and returned no current failed run. |
-| Controlled failing workflow | Implemented locally | `.github/workflows/demo-failing-build.yml`; requires push before live dispatch. |
+| GitHub read smoke | Live validated | `get_latest_failed_build` reached `ImmanuelP31/MCP_AI` and returned the controlled failed run. |
+| Controlled failing workflow | Live validated | `.github/workflows/demo-failing-build.yml` dispatched on `main`. |
+| GitHub vertical-slice demo | Live validated | Failed build investigation, issue creation, approval-gated rerun request, approval, and rerun execution succeeded. |
 | Repository-document RAG | Live validated | 34 bounded repository docs/workflows ingested. |
 | OpenSearch RAG backend | Live validated | Query returned `index_backend: opensearch` with the controlled failing workflow as top result. |
 | OpenAI planner | Blocked | Provider endpoint reached, but returned HTTP 401 with the configured key. |
@@ -34,6 +35,28 @@ Measured output summary:
 - Top citation: `REPO-GITHUB-WORKFLOWS-DEMO-FAILING-BUILD-YML`
 - Top source: `local-repository:.github/workflows/demo-failing-build.yml`
 - Top score: `1.0`
+
+## GitHub Vertical-Slice Evidence
+
+Live governed demo command:
+
+```powershell
+python scripts/demo/run_live_github_control_plane_demo.py --create-issue --request-rerun --approve-rerun
+```
+
+Measured output summary:
+
+- Repository: `ImmanuelP31/MCP_AI`
+- Failed workflow run: `31503657179`
+- Workflow name: `Demo Failing Build`
+- Failed commit: `93c4e31b8514bd26e21fda7e64eceb9e8a3a55fd`
+- Tool decisions before high-risk action: `ALLOWED`
+- Failure analysis source: `source_code_failure`
+- Failure analysis confidence: `0.78`
+- GitHub issue created: `https://github.com/ImmanuelP31/MCP_AI/issues/1`
+- High-risk rerun request decision: `PENDING_APPROVAL`
+- Human approval decision: `ALLOWED`
+- Rerun execution decision: `ALLOWED`
 
 ## OpenAI Failure Analysis
 
