@@ -111,7 +111,7 @@ def main() -> None:
             str(item.get("filename"))
             for item in changed.data.get("tool_result", {}).get("data", {}).get("files", [])
             if isinstance(item, dict) and item.get("filename")
-        ]
+        ][:100]
 
     analysis = _call(
         gateway,
