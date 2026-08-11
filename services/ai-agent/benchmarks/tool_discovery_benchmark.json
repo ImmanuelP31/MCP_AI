@@ -1,0 +1,258 @@
+[
+  {
+    "case_id": "td-001",
+    "query": "Why did yesterday's production build fail?",
+    "expected_tools": ["get_pipeline_logs", "get_build_status", "get_failed_jobs", "get_commit_history", "compare_deployments"]
+  },
+  {
+    "case_id": "td-002",
+    "query": "Find the failed CI job and show the pipeline logs.",
+    "expected_tools": ["get_failed_jobs", "get_pipeline_logs", "get_build_status"]
+  },
+  {
+    "case_id": "td-003",
+    "query": "Inspect commit history for the latest regression.",
+    "expected_tools": ["get_commit_history", "list_recent_commits", "summarize_diff"]
+  },
+  {
+    "case_id": "td-004",
+    "query": "Create a Jira-style issue for the broken deployment.",
+    "expected_tools": ["create_ticket", "get_deployment_status", "compare_deployments"]
+  },
+  {
+    "case_id": "td-005",
+    "query": "Retrieve deployment status for staging.",
+    "expected_tools": ["get_deployment_status", "compare_deployments"]
+  },
+  {
+    "case_id": "td-006",
+    "query": "Search engineering documentation for the rollback runbook.",
+    "expected_tools": ["search_documentation", "get_runbook", "search_knowledge"]
+  },
+  {
+    "case_id": "td-007",
+    "query": "Run tests for the pull request branch.",
+    "expected_tools": ["run_tests", "get_pull_request", "get_changed_files"]
+  },
+  {
+    "case_id": "td-008",
+    "query": "Who owns the checkout service?",
+    "expected_tools": ["get_service_owner", "get_runbook", "search_documentation"]
+  },
+  {
+    "case_id": "td-009",
+    "query": "Deploy the validated release to staging.",
+    "role": "OPERATOR",
+    "expected_tools": ["deploy_staging", "get_deployment_status"]
+  },
+  {
+    "case_id": "td-010",
+    "query": "Compare the previous production deployment with the current one.",
+    "expected_tools": ["compare_deployments", "get_deployment_status", "get_commit_history"]
+  },
+  {
+    "case_id": "td-011",
+    "query": "Show changed files in the PR that broke the build.",
+    "expected_tools": ["get_changed_files", "get_pull_request", "get_build_status", "get_pipeline_logs"]
+  },
+  {
+    "case_id": "td-012",
+    "query": "Summarize the diff for the failing repository changes.",
+    "expected_tools": ["summarize_diff", "get_changed_files", "get_commit_history"]
+  },
+  {
+    "case_id": "td-013",
+    "query": "Rerun the failed build after the flaky test fix.",
+    "role": "OPERATOR",
+    "expected_tools": ["rerun_build", "get_failed_jobs", "run_tests"]
+  },
+  {
+    "case_id": "td-014",
+    "query": "Find the latest build status for service-api.",
+    "expected_tools": ["get_build_status", "get_pipeline_logs"]
+  },
+  {
+    "case_id": "td-015",
+    "query": "Get failed jobs from the nightly pipeline.",
+    "expected_tools": ["get_failed_jobs", "get_pipeline_logs", "get_build_status"]
+  },
+  {
+    "case_id": "td-016",
+    "query": "Open a maintenance ticket for SIM-014.",
+    "expected_tools": ["create_ticket", "get_device_status", "get_recent_errors"]
+  },
+  {
+    "case_id": "td-017",
+    "query": "Why is SIM-014 unhealthy?",
+    "expected_tools": ["get_device_status", "get_device_telemetry", "get_device_services", "get_recent_errors", "generate_diagnostic_summary"]
+  },
+  {
+    "case_id": "td-018",
+    "query": "Find runbook steps for network timeout.",
+    "expected_tools": ["get_runbook", "search_documentation", "find_troubleshooting_steps", "search_knowledge"]
+  },
+  {
+    "case_id": "td-019",
+    "query": "Search configuration guides for telemetry interval settings.",
+    "expected_tools": ["search_configuration_guides", "search_knowledge", "search_documentation"]
+  },
+  {
+    "case_id": "td-020",
+    "query": "Get the current device service health.",
+    "expected_tools": ["get_service_health", "get_device_services", "get_device_health"]
+  },
+  {
+    "case_id": "td-021",
+    "query": "Retrieve recent device error logs.",
+    "expected_tools": ["get_recent_errors", "search_logs", "get_error_details"]
+  },
+  {
+    "case_id": "td-022",
+    "query": "Find similar historical failures for this incident.",
+    "expected_tools": ["find_similar_incidents", "generate_diagnostic_summary", "search_knowledge"]
+  },
+  {
+    "case_id": "td-023",
+    "query": "Run a bounded diagnostic check on SIM-014.",
+    "expected_tools": ["run_diagnostic_check", "run_device_diagnostics", "get_device_status"]
+  },
+  {
+    "case_id": "td-024",
+    "query": "Read the open engineering tickets.",
+    "expected_tools": ["get_open_tickets", "search_tickets", "get_ticket"]
+  },
+  {
+    "case_id": "td-025",
+    "query": "Assign the maintenance ticket to an operator.",
+    "expected_tools": ["assign_ticket", "update_ticket", "get_ticket"]
+  },
+  {
+    "case_id": "td-026",
+    "query": "Update the ticket after diagnostics complete.",
+    "expected_tools": ["update_ticket", "get_ticket", "search_tickets"]
+  },
+  {
+    "case_id": "td-027",
+    "query": "List devices with critical health.",
+    "expected_tools": ["list_devices", "get_device_health", "get_device_status"]
+  },
+  {
+    "case_id": "td-028",
+    "query": "Get recent telemetry for SIM-014.",
+    "expected_tools": ["get_device_telemetry", "get_resource_usage", "get_device_health"]
+  },
+  {
+    "case_id": "td-029",
+    "query": "Read the device configuration before changing telemetry settings.",
+    "expected_tools": ["get_device_configuration", "search_configuration_guides", "update_device_configuration"]
+  },
+  {
+    "case_id": "td-030",
+    "query": "Request a governed service restart for the crashed service.",
+    "role": "OPERATOR",
+    "expected_tools": ["restart_service", "get_device_services", "get_recent_errors"]
+  },
+  {
+    "case_id": "td-031",
+    "query": "Prepare a safe device restart workflow.",
+    "role": "OPERATOR",
+    "expected_tools": ["restart_device", "get_device_status", "run_device_diagnostics"]
+  },
+  {
+    "case_id": "td-032",
+    "query": "Change simulator configuration after approval.",
+    "role": "OPERATOR",
+    "expected_tools": ["update_device_configuration", "get_device_configuration", "search_configuration_guides"]
+  },
+  {
+    "case_id": "td-033",
+    "query": "Find procedure for sensor initialization failure.",
+    "expected_tools": ["find_troubleshooting_steps", "get_procedure", "search_knowledge"]
+  },
+  {
+    "case_id": "td-034",
+    "query": "Read a knowledge document by document ID.",
+    "expected_tools": ["get_document", "search_knowledge"]
+  },
+  {
+    "case_id": "td-035",
+    "query": "Get a troubleshooting procedure for the failed telemetry service.",
+    "expected_tools": ["get_procedure", "find_troubleshooting_steps", "get_service_health"]
+  },
+  {
+    "case_id": "td-036",
+    "query": "Which deployment introduced the failing commit?",
+    "expected_tools": ["compare_deployments", "get_commit_history", "get_deployment_status"]
+  },
+  {
+    "case_id": "td-037",
+    "query": "Show pull request checks for the branch.",
+    "expected_tools": ["get_pull_request", "get_build_status", "get_failed_jobs"]
+  },
+  {
+    "case_id": "td-038",
+    "query": "Find repository files changed in the latest deployment.",
+    "expected_tools": ["get_changed_files", "compare_deployments", "get_commit_history"]
+  },
+  {
+    "case_id": "td-039",
+    "query": "Search docs for staging deploy guide.",
+    "expected_tools": ["search_documentation", "get_runbook", "deploy_staging"]
+  },
+  {
+    "case_id": "td-040",
+    "query": "Get service escalation and team ownership.",
+    "expected_tools": ["get_service_owner", "get_runbook"]
+  },
+  {
+    "case_id": "td-041",
+    "query": "Check rollout health for the latest release.",
+    "expected_tools": ["get_deployment_status", "compare_deployments"]
+  },
+  {
+    "case_id": "td-042",
+    "query": "Find build artifacts and pipeline output logs.",
+    "expected_tools": ["get_pipeline_logs", "get_build_status"]
+  },
+  {
+    "case_id": "td-043",
+    "query": "Validate a branch by running tests.",
+    "expected_tools": ["run_tests", "get_build_status"]
+  },
+  {
+    "case_id": "td-044",
+    "query": "Create an engineering issue with diagnostic evidence.",
+    "expected_tools": ["create_ticket", "generate_diagnostic_summary", "get_recent_errors"]
+  },
+  {
+    "case_id": "td-045",
+    "query": "Search ticket queue for open deployment issues.",
+    "expected_tools": ["search_tickets", "get_open_tickets", "get_deployment_status"]
+  },
+  {
+    "case_id": "td-046",
+    "query": "Retrieve resource usage for a degraded device.",
+    "expected_tools": ["get_resource_usage", "get_device_telemetry", "get_device_health"]
+  },
+  {
+    "case_id": "td-047",
+    "query": "Find error details for E-NET-TIMEOUT.",
+    "expected_tools": ["get_error_details", "get_recent_errors", "find_troubleshooting_steps"]
+  },
+  {
+    "case_id": "td-048",
+    "query": "Search logs for sensor ingestor crash.",
+    "expected_tools": ["search_logs", "get_recent_errors", "get_service_health"]
+  },
+  {
+    "case_id": "td-049",
+    "query": "Read service runbook and owner before remediation.",
+    "expected_tools": ["get_runbook", "get_service_owner", "search_documentation"]
+  },
+  {
+    "case_id": "td-050",
+    "query": "Plan staging deployment after tests pass.",
+    "role": "OPERATOR",
+    "expected_tools": ["run_tests", "deploy_staging", "get_deployment_status"]
+  }
+]
