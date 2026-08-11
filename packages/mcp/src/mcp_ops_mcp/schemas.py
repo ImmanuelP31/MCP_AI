@@ -203,6 +203,14 @@ class GitHubChangedFilesInput(GitHubRepositoryInput):
     head: str = Field(min_length=7, max_length=64, pattern=r"^[A-Fa-f0-9]+$")
 
 
+class GitHubPullRequestInput(GitHubRepositoryInput):
+    pull_number: int = Field(ge=1)
+
+
+class GitHubDiffSummaryInput(GitHubChangedFilesInput):
+    max_files: int = Field(default=20, ge=1, le=100)
+
+
 class GitHubWorkflowRunsInput(GitHubRepositoryInput):
     branch: str | None = Field(
         default=None,
@@ -246,6 +254,32 @@ class GitHubCreateIssueInput(GitHubRepositoryInput):
 class GitHubRerunWorkflowInput(GitHubWorkflowRunInput):
     approval_token: ApprovalToken = Field(description="Human-approved operation token.")
     reason: str = Field(min_length=8, max_length=500)
+
+
+class GitHubRunTestsInput(GitHubRepositoryInput):
+    branch: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._/\-]+$",
+    )
+    test_suite: str = Field(
+        default="bounded",
+        min_length=3,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9_.-]+$",
+    )
+    reason: str = Field(default="Governed workflow validation.", min_length=8, max_length=500)
+
+
+class GitHubRerunBuildInput(GitHubWorkflowRunInput):
+    reason: str = Field(default="Governed CI rerun.", min_length=8, max_length=500)
+
+
+class AnalyzeBuildFailureInput(GitHubRepositoryInput):
+    logs: str = Field(default="", max_length=12000)
+    changed_files: list[str] = Field(default_factory=list, max_length=100)
+    build_conclusion: str | None = Field(default=None, max_length=80)
 
 
 class StructuredOutput(StrictModel):

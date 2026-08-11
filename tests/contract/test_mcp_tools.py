@@ -105,6 +105,17 @@ VALID_INPUTS: dict[str, dict[str, Any]] = {
         "repository": "ImmanuelP31/MCP_AI",
         "head": "abc1234",
     },
+    "summarize_diff": {
+        "actor_role": "ENGINEER",
+        "repository": "ImmanuelP31/MCP_AI",
+        "head": "abc1234",
+        "max_files": 20,
+    },
+    "get_pull_request": {
+        "actor_role": "ENGINEER",
+        "repository": "ImmanuelP31/MCP_AI",
+        "pull_number": 31,
+    },
     "get_workflow_runs": {
         "actor_role": "ENGINEER",
         "repository": "ImmanuelP31/MCP_AI",
@@ -131,6 +142,26 @@ VALID_INPUTS: dict[str, dict[str, Any]] = {
         "actor_role": "ENGINEER",
         "repository": "ImmanuelP31/MCP_AI",
         "job_id": 101,
+    },
+    "run_tests": {
+        "actor_role": "ENGINEER",
+        "repository": "ImmanuelP31/MCP_AI",
+        "branch": "main",
+        "test_suite": "bounded",
+        "reason": "Governed workflow validation.",
+    },
+    "rerun_build": {
+        "actor_role": "ENGINEER",
+        "repository": "ImmanuelP31/MCP_AI",
+        "run_id": 9001,
+        "reason": "Governed CI rerun.",
+    },
+    "analyze_build_failure": {
+        "actor_role": "ENGINEER",
+        "repository": "ImmanuelP31/MCP_AI",
+        "logs": "Running demo test suite\nSimulated test failure in payments-api\n",
+        "changed_files": ["src/payments/validation.py"],
+        "build_conclusion": "failure",
     },
     "create_issue": {
         "actor_role": "ENGINEER",

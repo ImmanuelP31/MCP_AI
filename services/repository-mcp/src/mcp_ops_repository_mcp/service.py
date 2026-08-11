@@ -19,6 +19,9 @@ class GitHubRepositoryService:
         else:
             self.client = OfflineGitHubClient(self.config.default_repository)
 
+    def resolve_repository(self, repository: str | None = None) -> str:
+        return self._repository(repository)
+
     def get_recent_commits(
         self,
         repository: str | None,
@@ -70,12 +73,18 @@ class GitHubRepositoryService:
         head: str,
     ) -> dict[str, Any]:
         repo = self._repository(repository)
-        compare = f"{base}...{head}" if base else head
-        data = self.client.request("GET", f"/repos/{repo}/compare/{compare}")
+        if base:
+            data = self.client.request("GET", f"/repos/{repo}/compare/{base}...{head}")
+            commits = [item.get("sha", "") for item in data.get("commits", [])]
+            files = data.get("files", [])
+        else:
+            data = self.client.request("GET", f"/repos/{repo}/commits/{head}")
+            commits = [data.get("sha", head)]
+            files = data.get("files", [])
         return self._payload(
             repo,
             {
-                "commits": [item.get("sha", "") for item in data.get("commits", [])],
+                "commits": commits,
                 "files": [
                     {
                         "filename": item.get("filename", ""),
@@ -83,8 +92,55 @@ class GitHubRepositoryService:
                         "additions": item.get("additions", 0),
                         "deletions": item.get("deletions", 0),
                     }
-                    for item in data.get("files", [])
+                    for item in files
                 ],
+            },
+        )
+
+    def summarize_diff(
+        self,
+        repository: str | None,
+        base: str | None,
+        head: str,
+        max_files: int,
+    ) -> dict[str, Any]:
+        changed = self.get_changed_files(repository, base, head)
+        files = changed["data"]["files"][:max_files]
+        additions = sum(int(item.get("additions", 0)) for item in files)
+        deletions = sum(int(item.get("deletions", 0)) for item in files)
+        touched = ", ".join(str(item.get("filename", "")) for item in files[:8])
+        return self._payload(
+            changed["data"]["repository"],
+            {
+                "summary": {
+                    "file_count": len(files),
+                    "additions": additions,
+                    "deletions": deletions,
+                    "focus": touched,
+                    "classification": (
+                        "application_code_change"
+                        if any("src/" in str(item.get("filename", "")) for item in files)
+                        else "configuration_or_documentation_change"
+                    ),
+                }
+            },
+        )
+
+    def get_pull_request(self, repository: str | None, pull_number: int) -> dict[str, Any]:
+        repo = self._repository(repository)
+        data = self.client.request("GET", f"/repos/{repo}/pulls/{pull_number}")
+        return self._payload(
+            repo,
+            {
+                "pull_request": {
+                    "number": data.get("number", pull_number),
+                    "title": data.get("title", ""),
+                    "state": data.get("state", ""),
+                    "head_sha": data.get("head", {}).get("sha", ""),
+                    "base_branch": data.get("base", {}).get("ref", ""),
+                    "head_branch": data.get("head", {}).get("ref", ""),
+                    "url": data.get("html_url", ""),
+                }
             },
         )
 
@@ -149,6 +205,90 @@ class GitHubRepositoryService:
                 "job_id": job_id,
                 "truncated": len(str(logs)) > max_bytes,
                 "logs": text,
+            },
+        )
+
+    def run_tests(
+        self,
+        repository: str | None,
+        branch: str | None,
+        test_suite: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        repo = self._repository(repository)
+        selected_branch = branch or self.config.default_branch
+        return self._payload(
+            repo,
+            {
+                "test_result": {
+                    "branch": selected_branch,
+                    "suite": test_suite,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "duration_seconds": 42,
+                    "reason": reason,
+                    "backend": "local-mocked-pipeline",
+                }
+            },
+        )
+
+    def rerun_build(self, repository: str | None, run_id: int, reason: str) -> dict[str, Any]:
+        repo = self._repository(repository)
+        if getattr(self.client, "is_configured", False):
+            self.client.request("POST", f"/repos/{repo}/actions/runs/{run_id}/rerun")
+            backend = "github-actions"
+        else:
+            backend = "local-mocked-pipeline"
+        return self._payload(
+            repo,
+            {
+                "run_id": run_id,
+                "rerun_requested": True,
+                "reason": reason,
+                "backend": backend,
+            },
+        )
+
+    def analyze_build_failure(
+        self,
+        repository: str | None,
+        logs: str,
+        changed_files: list[str],
+        build_conclusion: str | None,
+    ) -> dict[str, Any]:
+        repo = self._repository(repository)
+        normalized_logs = logs.lower()
+        code_files = [
+            item
+            for item in changed_files
+            if item.startswith(("src/", "apps/", "packages/", "services/"))
+            and not item.endswith((".md", ".txt"))
+        ]
+        if "test failure" in normalized_logs or "failed" in normalized_logs:
+            failure_source = "source_code_failure" if code_files else "pipeline_or_environment"
+            confidence = 0.78 if code_files else 0.61
+        elif build_conclusion in {"failure", "timed_out"}:
+            failure_source = "unknown_build_failure"
+            confidence = 0.52
+        else:
+            failure_source = "no_failure_detected"
+            confidence = 0.4
+        return self._payload(
+            repo,
+            {
+                "analysis": {
+                    "source": failure_source,
+                    "confidence": confidence,
+                    "observations": [
+                        f"build_conclusion={build_conclusion or 'unknown'}",
+                        f"code_files_changed={len(code_files)}",
+                    ],
+                    "recommended_action": (
+                        "Create an engineering issue and run bounded tests."
+                        if failure_source == "source_code_failure"
+                        else "Collect more CI logs before opening a code-defect ticket."
+                    ),
+                }
             },
         )
 

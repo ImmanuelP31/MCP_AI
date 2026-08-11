@@ -546,11 +546,30 @@ for _name, _description, _risk, _permission, _approval, _tags in [
     )
 _update_metadata(
     "run_tests",
+    executable=True,
     idempotent=False,
     retry_safe=True,
     default_max_retries=1,
     retry_strategy="FIXED_DELAY",
 )
+_update_metadata(
+    "rerun_build",
+    executable=True,
+    idempotent=False,
+    retry_safe=True,
+    default_max_retries=1,
+    retry_strategy="FIXED_DELAY",
+)
+_update_metadata(
+    "analyze_build_failure",
+    executable=True,
+    idempotent=True,
+    retry_safe=True,
+    default_max_retries=1,
+    retry_strategy="FIXED_DELAY",
+)
+_update_metadata("summarize_diff", executable=True)
+_update_metadata("get_pull_request", executable=True)
 _update_metadata(
     "deploy_staging",
     idempotent=False,

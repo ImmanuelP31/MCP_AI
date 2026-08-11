@@ -1,0 +1,40 @@
+name: Demo Failing Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      fail_demo:
+        description: "Set to true to create a controlled failed build for MCP demo."
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      service:
+        description: "Service name shown in demo logs."
+        required: true
+        default: "payments-api"
+        type: string
+
+jobs:
+  controlled-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Emit engineering context
+        run: |
+          echo "service=${{ inputs.service }}"
+          echo "scenario=controlled build failure for MCP Engineering Control Plane demo"
+          echo "signal=Simulated payments-api test failure in validation layer"
+
+      - name: Controlled failure
+        if: ${{ inputs.fail_demo == 'true' }}
+        run: |
+          echo "::error file=src/payments/validation.py,line=42::Simulated payments-api validation test failure"
+          exit 1
+
+      - name: Controlled success
+        if: ${{ inputs.fail_demo != 'true' }}
+        run: echo "Demo build completed successfully."

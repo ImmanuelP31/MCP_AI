@@ -3,12 +3,17 @@ from __future__ import annotations
 from mcp.server.lowlevel import Server
 from mcp_ops_mcp.dispatcher import McpToolDispatcher, ToolDefinition, build_lowlevel_server
 from mcp_ops_mcp.schemas import (
+    AnalyzeBuildFailureInput,
     GitHubChangedFilesInput,
     GitHubCommitInput,
     GitHubCreateIssueInput,
+    GitHubDiffSummaryInput,
+    GitHubPullRequestInput,
     GitHubRecentCommitsInput,
     GitHubRepositoryInput,
+    GitHubRerunBuildInput,
     GitHubRerunWorkflowInput,
+    GitHubRunTestsInput,
     GitHubWorkflowJobInput,
     GitHubWorkflowRunInput,
     GitHubWorkflowRunsInput,
@@ -66,6 +71,22 @@ def create_dispatcher(
             StructuredOutput,
             lambda model: StructuredOutput.model_validate(
                 service.get_changed_files(model.repository, model.base, model.head)
+            ),
+        ),
+        ToolDefinition(
+            TOOL_REGISTRY["summarize_diff"],
+            GitHubDiffSummaryInput,
+            StructuredOutput,
+            lambda model: StructuredOutput.model_validate(
+                service.summarize_diff(model.repository, model.base, model.head, model.max_files)
+            ),
+        ),
+        ToolDefinition(
+            TOOL_REGISTRY["get_pull_request"],
+            GitHubPullRequestInput,
+            StructuredOutput,
+            lambda model: StructuredOutput.model_validate(
+                service.get_pull_request(model.repository, model.pull_number)
             ),
         ),
         ToolDefinition(
@@ -127,6 +148,35 @@ def create_dispatcher(
             StructuredOutput,
             lambda model: StructuredOutput.model_validate(
                 service.get_job_logs(model.repository, model.job_id, model.max_bytes)
+            ),
+        ),
+        ToolDefinition(
+            TOOL_REGISTRY["run_tests"],
+            GitHubRunTestsInput,
+            StructuredOutput,
+            lambda model: StructuredOutput.model_validate(
+                service.run_tests(model.repository, model.branch, model.test_suite, model.reason)
+            ),
+        ),
+        ToolDefinition(
+            TOOL_REGISTRY["rerun_build"],
+            GitHubRerunBuildInput,
+            StructuredOutput,
+            lambda model: StructuredOutput.model_validate(
+                service.rerun_build(model.repository, model.run_id, model.reason)
+            ),
+        ),
+        ToolDefinition(
+            TOOL_REGISTRY["analyze_build_failure"],
+            AnalyzeBuildFailureInput,
+            StructuredOutput,
+            lambda model: StructuredOutput.model_validate(
+                service.analyze_build_failure(
+                    model.repository,
+                    model.logs,
+                    model.changed_files,
+                    model.build_conclusion,
+                )
             ),
         ),
         ToolDefinition(

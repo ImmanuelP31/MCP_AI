@@ -15,7 +15,7 @@ ImmanuelP31/MCP_AI
 Create a fine-grained GitHub token scoped only to the demo repository. Put it in `.env`; do not paste it into chat and do not commit it.
 
 ```env
-GITHUB_TOKEN=github_pat_xxx
+GITHUB_TOKEN=replace-with-fine-grained-github-token
 GITHUB_OWNER=ImmanuelP31
 GITHUB_REPO=MCP_AI
 GITHUB_DEFAULT_BRANCH=main
@@ -50,8 +50,55 @@ Live-backed when `GITHUB_TOKEN` is configured; otherwise they return explicit of
 | `list_recent_commits` | READ_ONLY | no | Existing planner alias for recent commits |
 | `get_commit_details` | READ_ONLY | no | Inspect one commit and changed files |
 | `get_changed_files` | READ_ONLY | no | Compare changed files |
+| `summarize_diff` | READ_ONLY | no | Summarize changed files and classify code/config impact |
+| `get_pull_request` | READ_ONLY | no | Retrieve pull request metadata |
+| `run_tests` | MEDIUM | no | Run a bounded local mocked pipeline test suite |
+| `rerun_build` | MEDIUM | no | Rerun a build through GitHub Actions when configured, mocked locally otherwise |
+| `analyze_build_failure` | MEDIUM | no | Classify build failure evidence with deterministic rules |
 | `create_issue` | MEDIUM | no | Create a GitHub issue for a governed finding |
 | `rerun_workflow` | HIGH | yes | Rerun failed GitHub Actions jobs after approval |
+
+This gives the demo an executable vertical slice:
+
+```text
+get_latest_failed_build
+-> get_workflow_run_jobs
+-> get_job_logs
+-> get_recent_commits
+-> get_changed_files
+-> analyze_build_failure
+-> create_issue
+-> rerun_workflow, approval-gated
+```
+
+`run_tests`, `summarize_diff`, and `analyze_build_failure` are bounded local mocked pipeline tools
+for reproducible demos and tests. The GitHub read/write tools use live GitHub when
+`GITHUB_TOKEN` is configured.
+
+## Live LLM And Embedding Mode
+
+Keep deterministic defaults for tests:
+
+```env
+LLM_PLANNER_PROVIDER=deterministic
+EMBEDDING_PROVIDER=hashing
+TOOL_DISCOVERY_INDEX_BACKEND=memory
+KNOWLEDGE_INDEX_BACKEND=memory
+```
+
+For a live AI demo, set:
+
+```env
+OPENAI_API_KEY=your-valid-openai-key
+LLM_PLANNER_PROVIDER=openai
+EMBEDDING_PROVIDER=openai
+TOOL_DISCOVERY_INDEX_BACKEND=opensearch
+KNOWLEDGE_INDEX_BACKEND=opensearch
+```
+
+The live LLM planner still returns a typed `WorkflowPlanDraft`. Backend validation and policy
+remain authoritative. The LLM cannot approve operations, downgrade risk, invent executable tools,
+or bypass the MCP gateway.
 
 ## Demo Prompt
 
@@ -69,6 +116,31 @@ Expected flow:
 6. Admin approval is required before execution.
 7. Audit records include repository/run/job target resources.
 
+## Controlled Failed Build
+
+For a reproducible interview/demo failure, this repository includes:
+
+```text
+.github/workflows/demo-failing-build.yml
+```
+
+It is manual-only. After the branch containing that workflow is pushed to GitHub, run:
+
+```powershell
+python scripts/demo/run_live_github_control_plane_demo.py --trigger-failure --wait-seconds 90
+```
+
+Then run the governed investigation:
+
+```powershell
+python scripts/demo/run_live_github_control_plane_demo.py --create-issue --request-rerun --approve-rerun
+```
+
+The script calls GitHub through governed MCP gateway tools and prints a compact JSON trace for
+presentation.
+
+Full runbook: `docs/final-live-demo-runbook.md`.
+
 ## Local Verification
 
 ```bash
@@ -77,3 +149,14 @@ python -m pytest tests/unit/test_workflow_planning.py tests/unit/test_tool_disco
 ```
 
 The normal test suite uses deterministic offline GitHub data. Live GitHub calls require `GITHUB_TOKEN`.
+
+Live smoke commands:
+
+```powershell
+$env:LLM_PLANNER_PROVIDER="openai"
+$env:EMBEDDING_PROVIDER="openai"
+python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
+```
+
+If OpenAI returns HTTP 401, rotate or replace `OPENAI_API_KEY`. If GitHub has no failed workflow
+run, the live GitHub smoke will correctly report no latest failed build.

@@ -42,6 +42,43 @@ def test_github_issue_creation_executes_through_gateway() -> None:
     assert response.data["tool_result"]["data"]["issue"]["number"] == 42
 
 
+def test_repository_mcp_executes_mocked_pipeline_and_analysis_tools() -> None:
+    dispatcher = create_dispatcher()
+
+    tests = dispatcher.call_tool(
+        "run_tests",
+        {
+            "actor_role": "ENGINEER",
+            "repository": "ImmanuelP31/MCP_AI",
+            "branch": "main",
+            "test_suite": "bounded",
+            "reason": "Governed workflow validation.",
+        },
+    )
+    analysis = dispatcher.call_tool(
+        "analyze_build_failure",
+        {
+            "actor_role": "ENGINEER",
+            "repository": "ImmanuelP31/MCP_AI",
+            "logs": "Running demo test suite\nSimulated test failure in payments-api\n",
+            "changed_files": ["src/payments/validation.py"],
+            "build_conclusion": "failure",
+        },
+    )
+    diff = dispatcher.call_tool(
+        "summarize_diff",
+        {
+            "actor_role": "ENGINEER",
+            "repository": "ImmanuelP31/MCP_AI",
+            "head": "abc1234",
+        },
+    )
+
+    assert tests.structured_content["data"]["test_result"]["backend"] == "local-mocked-pipeline"
+    assert analysis.structured_content["data"]["analysis"]["source"] == "source_code_failure"
+    assert diff.structured_content["data"]["summary"]["classification"] == "application_code_change"
+
+
 def test_github_workflow_rerun_requires_approval_before_execution() -> None:
     gateway = McpGateway()
     arguments = {

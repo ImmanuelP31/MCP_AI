@@ -69,21 +69,44 @@ class GitHubClient:
         body: dict[str, Any] | None = None,
         max_bytes: int = 2_000_000,
     ) -> Any:
+        return self._request(
+            method,
+            path,
+            query=query,
+            body=body,
+            max_bytes=max_bytes,
+            redirects_remaining=1,
+        )
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: dict[str, str | int] | None = None,
+        body: dict[str, Any] | None = None,
+        max_bytes: int = 2_000_000,
+        redirects_remaining: int = 1,
+    ) -> Any:
         if not self.config.token:
             raise GitHubApiError("GitHub token is not configured.")
-        parsed = urlparse(self.config.api_base_url)
+        parsed = urlparse(self.config.api_base_url if path.startswith("/") else path)
         if parsed.scheme != "https" or not parsed.hostname:
             raise GitHubApiError("GitHub API base URL must be HTTPS.")
-        target = path
+        target = path if path.startswith("/") else parsed.path
+        if not path.startswith("/") and parsed.query:
+            target = f"{target}?{parsed.query}"
         if query:
-            target = f"{target}?{urlencode(query)}"
+            separator = "&" if "?" in target else "?"
+            target = f"{target}{separator}{urlencode(query)}"
         encoded_body = None if body is None else json.dumps(body).encode("utf-8")
         headers = {
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {self.config.token}",
             "User-Agent": "mcp-engineering-ops-demo",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        if parsed.hostname == urlparse(self.config.api_base_url).hostname:
+            headers["Authorization"] = f"Bearer {self.config.token}"
         if encoded_body is not None:
             headers["Content-Type"] = "application/json"
         connection = HTTPSConnection(
@@ -97,6 +120,19 @@ class GitHubClient:
             raw = response.read(max_bytes + 1)
             if len(raw) > max_bytes:
                 raise GitHubApiError("GitHub response exceeded configured size limit.")
+            if 300 <= response.status < 400 and redirects_remaining > 0:
+                location = response.getheader("Location")
+                if not location:
+                    raise GitHubApiError("GitHub redirect did not include a location header.")
+                redirected = urlparse(location)
+                if redirected.scheme != "https" or not redirected.hostname:
+                    raise GitHubApiError("GitHub redirect target must be HTTPS.")
+                return self._request(
+                    "GET",
+                    location,
+                    max_bytes=max_bytes,
+                    redirects_remaining=redirects_remaining - 1,
+                )
             if response.status >= 400:
                 raise GitHubApiError(f"GitHub API returned HTTP {response.status}.")
             content_type = response.getheader("Content-Type") or ""
@@ -181,6 +217,15 @@ class OfflineGitHubClient:
                 ],
                 "commits": [{"sha": "abc1234demo"}],
             }
+        if "/pulls/" in path:
+            return {
+                "number": 31,
+                "title": "Fix payments validation edge case",
+                "state": "open",
+                "head": {"sha": "abc1234demo", "ref": "fix/payments-validation"},
+                "base": {"ref": "main"},
+                "html_url": f"https://github.com/{self.repository}/pull/31",
+            }
         if path.endswith("/issues"):
             return {
                 "number": 42,
@@ -189,6 +234,8 @@ class OfflineGitHubClient:
                 "state": "open",
             }
         if path.endswith("/rerun-failed-jobs"):
+            return {"rerun_requested": True}
+        if path.endswith("/rerun"):
             return {"rerun_requested": True}
         if "/commits/" in path:
             return {
