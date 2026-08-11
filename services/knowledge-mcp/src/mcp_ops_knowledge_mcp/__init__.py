@@ -1,0 +1,2 @@
+"""Knowledge MCP domain server."""
+

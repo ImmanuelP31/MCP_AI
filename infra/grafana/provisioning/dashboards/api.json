@@ -1,0 +1,47 @@
+{
+  "uid": "mcp-ops-api",
+  "title": "MCP Ops API",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "tags": ["mcp-ops", "api"],
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "API latency p95",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(mcp_ops_api_latency_seconds_bucket[5m])) by (le, path, method))",
+          "legendFormat": "{{method}} {{path}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "API error rate",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(mcp_ops_api_errors_total[5m])) by (path, method, status_code)",
+          "legendFormat": "{{method}} {{path}} {{status_code}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "API requests",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(mcp_ops_api_requests_total[5m])) by (path, method, status_code)",
+          "legendFormat": "{{method}} {{path}} {{status_code}}"
+        }
+      ]
+    }
+  ]
+}

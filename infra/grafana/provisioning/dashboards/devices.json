@@ -1,0 +1,35 @@
+{
+  "uid": "mcp-ops-devices",
+  "title": "MCP Ops Devices",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "tags": ["mcp-ops", "devices"],
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Device health score",
+      "gridPos": { "x": 0, "y": 0, "w": 16, "h": 8 },
+      "targets": [
+        {
+          "expr": "mcp_ops_device_health_score",
+          "legendFormat": "{{device_id}} {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Critical devices",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 8 },
+      "targets": [
+        {
+          "expr": "count(mcp_ops_device_health_score{status=\"CRITICAL\"})",
+          "legendFormat": "critical"
+        }
+      ]
+    }
+  ]
+}

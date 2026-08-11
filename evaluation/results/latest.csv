@@ -1,0 +1,5 @@
+config,cases,tool_recall,tool_precision,exact_tool_set_accuracy,workflow_validity_rate,workflow_completion_rate,hallucinated_tool_rate,policy_violation_attempt_rate,approval_classification_accuracy,rag_recall_at_k,rag_mrr,average_workflow_length,planner_latency_ms,end_to_end_latency_ms,mode
+all_tools,330,0.5379,0.8409,0.0818,0.6545,0.5455,0.2226,0.0,0.8091,0.0,0.0,2.6545,2.4078,149.2931,mock
+semantic,330,0.5015,0.8477,0.0909,0.7455,0.6364,0.2016,0.0,0.8091,0.0,0.0,2.2545,5.2778,151.952,mock
+semantic_rag,330,0.5879,0.8433,0.0818,0.7455,0.6364,0.2013,0.0,0.8091,0.6955,0.4481,2.7091,31.9643,171.54,mock
+semantic_rag_graph,330,0.5879,0.8433,0.0818,0.7455,0.6364,0.2013,0.0,0.8091,0.6955,0.4481,2.7091,31.7445,167.416,mock

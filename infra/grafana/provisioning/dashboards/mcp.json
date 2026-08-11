@@ -1,0 +1,71 @@
+{
+  "uid": "mcp-ops-mcp",
+  "title": "MCP Ops Gateway and Tools",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "tags": ["mcp-ops", "mcp"],
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "MCP calls",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(mcp_ops_mcp_calls_total[5m])) by (tool_name, domain, decision)",
+          "legendFormat": "{{domain}} {{tool_name}} {{decision}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "MCP failures",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(mcp_ops_mcp_failures_total[5m])) by (tool_name, error_code)",
+          "legendFormat": "{{tool_name}} {{error_code}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Tool latency p95",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(mcp_ops_tool_latency_seconds_bucket[5m])) by (le, tool_name, domain))",
+          "legendFormat": "{{domain}} {{tool_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Authorization failures",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(mcp_ops_tool_authorization_failures_total[5m])) by (tool_name, role)",
+          "legendFormat": "{{tool_name}} {{role}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Approval latency p95",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(mcp_ops_approval_latency_seconds_bucket[5m])) by (le, tool_name, status))",
+          "legendFormat": "{{tool_name}} {{status}}"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+"""Diagnostics MCP domain server."""
+
