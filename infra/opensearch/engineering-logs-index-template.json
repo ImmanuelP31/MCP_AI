@@ -1,0 +1,18 @@
+{
+  "index_patterns": ["engineering-logs-*"],
+  "template": {
+    "mappings": {
+      "properties": {
+        "timestamp": { "type": "date" },
+        "device_id": { "type": "keyword" },
+        "service": { "type": "keyword" },
+        "severity": { "type": "keyword" },
+        "message": { "type": "text" },
+        "error_code": { "type": "keyword" },
+        "trace_id": { "type": "keyword" },
+        "correlation_id": { "type": "keyword" }
+      }
+    }
+  }
+}
+

@@ -1,0 +1,12 @@
+topics:
+  - device.telemetry
+  - device.health
+  - device.alert
+  - device.diagnostic
+  - device.operation
+  - ticket.created
+  - ticket.updated
+  - approval.requested
+  - approval.completed
+  - audit.events
+
