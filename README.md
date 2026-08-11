@@ -51,9 +51,10 @@ Core services:
 
 - Governed MCP gateway with tool registry, permissions, risk classes, rate limits, idempotency, and audit.
 - GitHub-backed repository/CI tools for failed-build investigation, commit inspection, issue creation, and approval-gated workflow reruns.
-- Semantic MCP tool discovery so the planner receives only relevant, authorized tools.
-- Engineering Knowledge RAG over repository, CI/CD, deployment, ownership, testing, and MCP documentation.
-- Typed AI-generated workflow DAGs with schema validation, graph validation, argument validation, and policy validation.
+- Executable GitHub/CI vertical slice: build status, job logs, commits, changed files, diff summaries, bounded tests, deterministic failure analysis, issue creation, and approval-gated reruns.
+- Semantic MCP tool discovery so the planner receives only relevant, authorized tools, with deterministic hashing embeddings for CI and optional OpenAI embeddings for live demos.
+- Engineering Knowledge RAG over repository, CI/CD, deployment, ownership, testing, and MCP documentation, with memory or OpenSearch-backed indexes.
+- Typed AI-generated workflow DAGs with deterministic and live LLM planner modes, schema validation, graph validation, argument validation, and policy validation.
 - Policy-constrained workflow transformation: AI recommends, policy authorizes, human approves, MCP executes, audit records.
 - Capability graph for policy-compliant paths across repositories, pipelines, deployments, tickets, documentation, MCP servers, and tools.
 - Resilient workflow execution with checkpoints, retries, approval waits, compensation, resume, and node-level retry.
@@ -90,6 +91,30 @@ See [docs/security.md](docs/security.md) and [docs/threat-model.md](docs/threat-
 python -m pip install -e ".[dev]"
 npm --prefix apps/frontend install
 docker compose -f infra/docker/docker-compose.dev.yml up -d --build
+```
+
+Live GitHub/LLM demo settings:
+
+```env
+GITHUB_TOKEN=replace-with-fine-grained-github-token
+GITHUB_OWNER=ImmanuelP31
+GITHUB_REPO=MCP_AI
+GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI
+
+OPENAI_API_KEY=your-valid-openai-key
+LLM_PLANNER_PROVIDER=openai
+EMBEDDING_PROVIDER=openai
+TOOL_DISCOVERY_INDEX_BACKEND=opensearch
+KNOWLEDGE_INDEX_BACKEND=opensearch
+```
+
+Keep the defaults below for tests and CI:
+
+```env
+LLM_PLANNER_PROVIDER=deterministic
+EMBEDDING_PROVIDER=hashing
+TOOL_DISCOVERY_INDEX_BACKEND=memory
+KNOWLEDGE_INDEX_BACKEND=memory
 ```
 
 Local URLs:
@@ -131,7 +156,8 @@ Polished demonstration:
 8. Show audit trail and Prometheus metrics.
 
 See [docs/demo-guide.md](docs/demo-guide.md).
-For the GitHub-backed demo slice, see [docs/github-demo-integration.md](docs/github-demo-integration.md).
+For the GitHub-backed demo slice, see [docs/github-demo-integration.md](docs/github-demo-integration.md)
+and [docs/final-live-demo-runbook.md](docs/final-live-demo-runbook.md).
 
 ## Screenshots
 
@@ -157,6 +183,7 @@ Run:
 
 ```bash
 python -m evaluation.run --config semantic_rag_graph
+python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 
 See [docs/ai-evaluation.md](docs/ai-evaluation.md).
@@ -164,6 +191,10 @@ See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 ## Limitations
 
 - Current benchmark results are deterministic mock results unless a live model provider is configured.
+- Live LLM and OpenAI embedding benchmarks require a valid OpenAI API key; the configured key in this environment returned HTTP 401 during the final smoke attempt, so only deterministic benchmark results are recorded.
+- OpenSearch-backed repository-document RAG was live validated locally with `OPENSEARCH_URL=http://localhost:9200`; Docker-internal service names such as `http://opensearch:9200` are for containers, not host-run scripts.
+- Live GitHub failed-build investigation requires an actual failed GitHub Actions run, otherwise the GitHub tool correctly reports no latest failed build.
+- The controlled failing GitHub Actions workflow must be pushed to GitHub before it can be dispatched live.
 - The local simulator and synthetic engineering corpus are demo/pilot assets.
 - Enterprise identity federation is represented by signed JWT validation; production OIDC/JWKS integration should be wired to the same authenticator boundary.
 - Docker Compose is for local validation, not a production deployment topology.

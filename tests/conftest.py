@@ -1,7 +1,11 @@
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ["GITHUB_TOKEN"] = ""  # nosec B105
+
 SOURCE_ROOTS = [
     ROOT / "apps" / "api" / "src",
     ROOT / "packages" / "auth" / "src",
@@ -15,6 +19,7 @@ SOURCE_ROOTS = [
     ROOT / "services" / "ai-agent" / "src",
     ROOT / "services" / "knowledge-mcp" / "src",
     ROOT / "services" / "mcp-gateway" / "src",
+    ROOT / "services" / "repository-mcp" / "src",
     ROOT / "services" / "simulator-gateway" / "src",
     ROOT / "services" / "ticket-mcp" / "src",
 ]
