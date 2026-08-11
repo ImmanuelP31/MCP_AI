@@ -1,0 +1,2 @@
+"""Ticket MCP domain server."""
+
