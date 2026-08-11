@@ -29,12 +29,38 @@ Core files:
 - `services/ai-agent/src/mcp_ops_ai_agent/engineering_rag/models.py`
 - `services/ai-agent/src/mcp_ops_ai_agent/engineering_rag/corpus.py`
 - `services/ai-agent/src/mcp_ops_ai_agent/engineering_rag/ingestion.py`
+- `services/ai-agent/src/mcp_ops_ai_agent/engineering_rag/repo_docs.py`
 - `services/ai-agent/src/mcp_ops_ai_agent/engineering_rag/index.py`
 - `services/ai-agent/src/mcp_ops_ai_agent/engineering_rag/retrieval.py`
 - `services/ai-agent/src/mcp_ops_ai_agent/engineering_rag/service.py`
 - `services/ai-agent/src/mcp_ops_ai_agent/engineering_rag/evaluation.py`
 
-The local implementation uses deterministic hashing embeddings and BM25-style lexical scoring so tests do not require live LLM or OpenSearch access. `OpenSearchKnowledgeIndex` defines the production boundary for OpenSearch-backed vector/BM25 storage and falls back safely in this local runtime.
+The local implementation uses deterministic hashing embeddings and BM25-style lexical scoring so
+tests do not require live LLM or OpenSearch access. `OpenSearchKnowledgeIndex` defines the
+production boundary for OpenSearch-backed vector/BM25 storage and falls back safely in this local
+runtime. Live demos can use OpenAI embeddings through the provider abstraction.
+
+## Repository Documentation Ingestion
+
+By default, the RAG service combines the synthetic engineering corpus with bounded local repository
+documentation. It ingests only allow-listed documentation and workflow files:
+
+- `README.md`
+- `docs/*.md`
+- `docs/architecture/*.md`
+- `docs/architecture/decisions/*.md`
+- `.github/workflows/*.yml`
+- `.github/workflows/*.yaml`
+
+It excludes resume files, `.env`, generated frontend folders, and arbitrary user paths.
+
+Verify ingestion:
+
+```powershell
+python scripts/ingest_repo_docs.py --query "GitHub controlled failing build approval" --top-k 3
+```
+
+Set `RAG_INCLUDE_REPOSITORY_DOCS=false` to use only the synthetic corpus.
 
 ## API
 
@@ -111,4 +137,8 @@ Prompt-injection-like content in retrieved documents is flagged through the exis
 
 ## Limitations
 
-The local embedding provider is deterministic and suitable for repeatable tests, not semantic quality benchmarking against a production embedding model. OpenSearch is represented by an adapter boundary and deterministic fallback in this environment. Retrieved documentation can be stale or conflicting, so the planner retains citations and the policy engine remains the source of enforcement.
+The default local embedding provider is deterministic and suitable for repeatable tests, not
+semantic quality benchmarking against a production embedding model. Real-mode benchmarks require a
+valid embedding provider key. OpenSearch has an adapter boundary and deterministic fallback.
+Retrieved documentation can be stale or conflicting, so the planner retains citations and the
+policy engine remains the source of enforcement.

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from mcp_ops_ai_agent.engineering_rag import (
     EngineeringKnowledgeSearchRequest,
@@ -18,6 +20,7 @@ from mcp_ops_ai_agent.engineering_rag.models import (
     KnowledgeFilters,
     KnowledgeSearchMode,
 )
+from mcp_ops_ai_agent.engineering_rag.repo_docs import repository_engineering_documents
 from mcp_ops_ai_agent.tool_discovery.embeddings import HashingEmbeddingProvider
 from mcp_ops_observability.metrics import metrics_response
 
@@ -120,7 +123,7 @@ def test_malformed_json_document_is_rejected() -> None:
 
 
 def test_opensearch_failure_falls_back_to_local_index() -> None:
-    response = EngineeringRagService(index=OpenSearchKnowledgeIndex("http://localhost:9200")).search(
+    response = EngineeringRagService(index=OpenSearchKnowledgeIndex("file://not-opensearch")).search(
         EngineeringKnowledgeSearchRequest(query="failed build investigation", top_k=3)
     )
 
@@ -155,6 +158,40 @@ def test_prompt_injection_inside_document_is_flagged_not_trusted() -> None:
     assert payload["prompt_injection_detected"] is True
     assert payload["classification"] == "UNTRUSTED_RETRIEVED_EVIDENCE"
     assert "mcp_prompt_injection_detections_total" in metrics_response().decode("utf-8")
+
+
+def test_repository_docs_are_ingested_as_real_rag_sources() -> None:
+    service = EngineeringRagService()
+
+    response = service.search(
+        EngineeringKnowledgeSearchRequest(query="GitHub demo failing build workflow", top_k=10)
+    )
+
+    sources = [result.chunk.metadata.source for result in response.results]
+    assert any(source.startswith("local-repository:") for source in sources)
+
+
+def test_repository_doc_loader_is_bounded_to_allowed_documentation(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "resume").mkdir()
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / "README.md").write_text("Repository demo docs", encoding="utf-8")
+    (tmp_path / "docs" / "security.md").write_text("Security model", encoding="utf-8")
+    (tmp_path / "docs" / "resume" / "cv.md").write_text("private resume", encoding="utf-8")
+    (tmp_path / ".env").write_text("GITHUB_TOKEN=secret", encoding="utf-8")
+    (tmp_path / ".github" / "workflows" / "demo.yml").write_text(
+        "name: Demo workflow",
+        encoding="utf-8",
+    )
+
+    documents = repository_engineering_documents(tmp_path)
+    sources = {document.metadata.source for document in documents}
+
+    assert "local-repository:README.md" in sources
+    assert "local-repository:docs/security.md" in sources
+    assert "local-repository:.github/workflows/demo.yml" in sources
+    assert all("resume" not in source for source in sources)
+    assert all(".env" not in source for source in sources)
 
 
 def test_empty_corpus_returns_empty_results_and_metrics() -> None:

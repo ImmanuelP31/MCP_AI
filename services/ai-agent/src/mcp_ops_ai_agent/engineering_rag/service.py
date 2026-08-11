@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterable
 
+from mcp_ops_common.config import Settings, get_settings
 from mcp_ops_observability.metrics import record_rag_query
 
 from mcp_ops_ai_agent.engineering_rag.corpus import synthetic_engineering_corpus
@@ -10,6 +11,7 @@ from mcp_ops_ai_agent.engineering_rag.index import (
     InMemoryKnowledgeIndex,
     KnowledgeIndex,
     KnowledgeIndexUnavailable,
+    OpenSearchKnowledgeIndex,
 )
 from mcp_ops_ai_agent.engineering_rag.ingestion import ingest_document
 from mcp_ops_ai_agent.engineering_rag.models import (
@@ -20,10 +22,11 @@ from mcp_ops_ai_agent.engineering_rag.models import (
     KnowledgeSearchMode,
     KnowledgeSearchResult,
 )
+from mcp_ops_ai_agent.engineering_rag.repo_docs import repository_engineering_documents
 from mcp_ops_ai_agent.engineering_rag.retrieval import combined_score, explanation, lexical_score
 from mcp_ops_ai_agent.tool_discovery.embeddings import (
     EmbeddingProvider,
-    HashingEmbeddingProvider,
+    embedding_provider_from_settings,
 )
 
 
@@ -34,17 +37,20 @@ class EngineeringRagService:
         documents: Iterable[EngineeringDocument] | None = None,
         embedding_provider: EmbeddingProvider | None = None,
         index: KnowledgeIndex | None = None,
+        settings: Settings | None = None,
     ) -> None:
-        self.embedding_provider = embedding_provider or HashingEmbeddingProvider()
-        self.index = index or InMemoryKnowledgeIndex(self.embedding_provider)
-        source_documents = (
-            list(documents) if documents is not None else synthetic_engineering_corpus()
+        self.settings = settings or get_settings()
+        self.embedding_provider = embedding_provider or embedding_provider_from_settings(
+            self.settings
         )
+        self.index = index or _index_from_settings(self.settings, self.embedding_provider)
+        source_documents = list(documents) if documents is not None else self._default_documents()
         self.chunks = [
             chunk
             for document in source_documents
             for chunk in ingest_document(document, embedding_provider=self.embedding_provider)
         ]
+        _try_index_chunks(self.index, self.chunks)
 
     def search(
         self,
@@ -147,6 +153,12 @@ class EngineeringRagService:
             and (request.filters.include_stale or not chunk.metadata.stale)
         ]
 
+    def _default_documents(self) -> list[EngineeringDocument]:
+        documents = synthetic_engineering_corpus()
+        if self.settings.rag_include_repository_docs:
+            documents = [*documents, *repository_engineering_documents()]
+        return documents
+
 
 def _conflict_group(chunk: KnowledgeChunk) -> str | None:
     if chunk.metadata.document_type in {"deployment", "environment_policy"}:
@@ -158,3 +170,25 @@ def _conflict_group(chunk: KnowledgeChunk) -> str | None:
         ]
         return ":".join(parts)
     return None
+
+
+def _index_from_settings(
+    settings: Settings,
+    embedding_provider: EmbeddingProvider,
+) -> KnowledgeIndex:
+    if settings.knowledge_index_backend.lower() == "opensearch":
+        return OpenSearchKnowledgeIndex(
+            settings.opensearch_url,
+            index_name=settings.opensearch_knowledge_index,
+        )
+    return InMemoryKnowledgeIndex(embedding_provider)
+
+
+def _try_index_chunks(index: KnowledgeIndex, chunks: list[KnowledgeChunk]) -> None:
+    indexer = getattr(index, "index_chunks", None)
+    if not callable(indexer):
+        return
+    try:
+        indexer(chunks)
+    except KnowledgeIndexUnavailable:
+        return

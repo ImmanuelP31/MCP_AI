@@ -15,6 +15,7 @@ from mcp_ops_ai_agent.tool_discovery.models import (
 from mcp_ops_ai_agent.tool_discovery.retrieval import explanation
 from mcp_ops_ai_agent.tool_discovery.service import ToolDiscoveryService
 from mcp_ops_ai_agent.workflows.models import WorkflowPlanRequest
+from mcp_ops_ai_agent.workflows.planner import workflow_planner_from_settings
 from mcp_ops_ai_agent.workflows.service import WorkflowPlanningService
 from mcp_ops_ai_agent.workflows.validator import WorkflowValidationError
 from mcp_ops_observability.metrics import record_ai_evaluation_summary
@@ -160,6 +161,7 @@ def _evaluate_case(
     service = WorkflowPlanningService(
         discovery=cast(ToolDiscoveryService, discovery),
         rag=EngineeringRagService(),
+        planner=workflow_planner_from_settings() if mode == "real" else None,
         use_rag=config.use_rag,
         use_capability_graph=config.use_capability_graph,
     )
