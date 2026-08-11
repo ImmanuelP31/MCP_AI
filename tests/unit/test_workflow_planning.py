@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from mcp_ops_ai_agent.workflows.models import WorkflowNode, WorkflowPlanDraft, WorkflowPlanRequest
-from mcp_ops_ai_agent.workflows.planner import JsonWorkflowPlanner, PlannerOutputError
+from mcp_ops_ai_agent.workflows.planner import (
+    JsonWorkflowPlanner,
+    LLMWorkflowPlanner,
+    PlannerOutputError,
+)
 from mcp_ops_ai_agent.workflows.policy import WorkflowPolicyEvaluator
 from mcp_ops_ai_agent.workflows.service import WorkflowPlanningService
 from mcp_ops_ai_agent.workflows.validator import WorkflowValidationError, WorkflowValidator
@@ -174,6 +179,94 @@ def test_planner_malformed_json_is_rejected() -> None:
                 created_by="engineer",
             )
         )
+
+
+class FakeWorkflowPlanClient:
+    def __init__(self, responses: list[str]) -> None:
+        self.responses = responses
+        self.calls: list[dict[str, Any]] = []
+
+    def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
+        self.calls.append({"system_prompt": system_prompt, "user_payload": user_payload})
+        return self.responses.pop(0)
+
+
+def test_llm_workflow_planner_returns_typed_schema_from_authorized_tool_subset() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Check why the latest build failed.",
+        role="ENGINEER",
+        top_k=10,
+    )
+    payload = {
+        "user_request": "Check why the latest build failed.",
+        "planner_model": "ignored-by-test",
+        "confidence": 0.8,
+        "nodes": [
+            {
+                "id": "build_status",
+                "tool_name": "get_build_status",
+                "tool_server": "cicd-mcp",
+                "description": "Read build status.",
+                "arguments": {"repository": "ImmanuelP31/MCP_AI"},
+                "risk_level": "READ_ONLY",
+            }
+        ],
+        "edges": [],
+    }
+    client = FakeWorkflowPlanClient([json.dumps(payload)])
+
+    draft = LLMWorkflowPlanner(client, model_name="test-model").plan(
+        "Check why the latest build failed.",
+        tools,
+        role="ENGINEER",
+    )
+
+    assert draft.nodes[0].tool_name == "get_build_status"
+    assert client.calls
+    assert "allowed_tools" in client.calls[0]["user_payload"]
+
+
+def test_llm_workflow_planner_fills_trusted_tool_metadata_and_arguments() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Check why the latest build failed.",
+        role="ENGINEER",
+        top_k=10,
+    )
+    client = FakeWorkflowPlanClient(
+        [
+            json.dumps(
+                {
+                    "tool_sequence": ["get_build_status"],
+                    "nodes": [
+                        {
+                            "id": "build_status",
+                            "tool_name": "get_build_status",
+                            "tool_server": "malicious-mcp",
+                            "risk_level": "CRITICAL",
+                            "approval_required": True,
+                            "arguments": {},
+                        }
+                    ],
+                    "confidence": 0.8,
+                }
+            )
+        ]
+    )
+
+    draft = LLMWorkflowPlanner(client, model_name="test-model").plan(
+        "Check why the latest build failed.",
+        tools,
+        role="ENGINEER",
+    )
+
+    node = draft.nodes[0]
+    assert node.tool_name == "get_build_status"
+    assert node.tool_server != "malicious-mcp"
+    assert node.risk_level == "READ_ONLY"
+    assert node.approval_required is False
+    assert node.arguments == {"repository": "ImmanuelP31/MCP_AI"}
 
 
 def test_planner_hallucinated_tool_is_rejected() -> None:

@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from mcp_ops_auth.rbac import ROLE_PERMISSIONS, Permission
+from mcp_ops_common.config import Settings, get_settings
 from mcp_ops_device_mcp.server import create_dispatcher as create_device_dispatcher
 from mcp_ops_diagnostics_mcp.server import create_dispatcher as create_diagnostics_dispatcher
 from mcp_ops_knowledge_mcp.server import create_dispatcher as create_knowledge_dispatcher
@@ -15,10 +16,11 @@ from mcp_ops_ticket_mcp.server import create_dispatcher as create_ticket_dispatc
 
 from mcp_ops_ai_agent.tool_discovery.embeddings import (
     EmbeddingProvider,
-    HashingEmbeddingProvider,
+    embedding_provider_from_settings,
 )
 from mcp_ops_ai_agent.tool_discovery.index import (
     InMemoryToolEmbeddingIndex,
+    OpenSearchToolEmbeddingIndex,
     ToolEmbeddingIndex,
     ToolIndexUnavailable,
 )
@@ -44,15 +46,20 @@ class ToolDiscoveryService:
         embedding_provider: EmbeddingProvider | None = None,
         index: ToolEmbeddingIndex | None = None,
         input_schemas: Mapping[str, dict[str, Any]] | None = None,
+        settings: Settings | None = None,
     ) -> None:
+        self.settings = settings or get_settings()
         self.registry = TOOL_REGISTRY if registry is None else registry
-        self.embedding_provider = embedding_provider or HashingEmbeddingProvider()
-        self.index = index or InMemoryToolEmbeddingIndex(self.embedding_provider)
+        self.embedding_provider = embedding_provider or embedding_provider_from_settings(
+            self.settings
+        )
+        self.index = index or _index_from_settings(self.settings, self.embedding_provider)
         self.input_schemas = dict(input_schemas or default_input_schemas())
         self.documents = [
             self._document_from_metadata(name, metadata)
             for name, metadata in sorted(self.registry.items())
         ]
+        _try_index_documents(self.index, self.documents)
 
     def retrieve(
         self,
@@ -227,3 +234,25 @@ def _role_authorized(role: str, document: ToolDocument) -> bool:
 
 def _top_k(value: int) -> int:
     return min(max(value, 1), 50)
+
+
+def _index_from_settings(
+    settings: Settings,
+    embedding_provider: EmbeddingProvider,
+) -> ToolEmbeddingIndex:
+    if settings.tool_discovery_index_backend.lower() == "opensearch":
+        return OpenSearchToolEmbeddingIndex(
+            settings.opensearch_url,
+            index_name=settings.opensearch_tool_index,
+        )
+    return InMemoryToolEmbeddingIndex(embedding_provider)
+
+
+def _try_index_documents(index: ToolEmbeddingIndex, documents: list[ToolDocument]) -> None:
+    indexer = getattr(index, "index_documents", None)
+    if not callable(indexer):
+        return
+    try:
+        indexer(documents)
+    except ToolIndexUnavailable:
+        return

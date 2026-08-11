@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService, evaluate_tool_discovery
-from mcp_ops_ai_agent.tool_discovery.index import SemanticMatch, ToolIndexUnavailable
+from mcp_ops_ai_agent.tool_discovery.embeddings import (
+    EmbeddingProviderUnavailable,
+    FallbackEmbeddingProvider,
+    HashingEmbeddingProvider,
+)
+from mcp_ops_ai_agent.tool_discovery.index import (
+    OpenSearchToolEmbeddingIndex,
+    SemanticMatch,
+    ToolIndexUnavailable,
+)
 from mcp_ops_ai_agent.tool_discovery.models import ToolDiscoveryFilters, ToolDocument
 from mcp_ops_ai_agent.tool_discovery.retrieval import lexical_score
 from mcp_ops_ai_agent.tool_discovery.service import ToolMetadataError
@@ -115,6 +126,60 @@ def test_opensearch_failure_falls_back_to_local_retrieval() -> None:
 
     assert response.index_backend == "fallback:in-memory-hashing"
     assert response.ranked_tools
+
+
+class UnavailableEmbeddingProvider:
+    def embed(self, text: str) -> tuple[float, ...]:
+        del text
+        raise EmbeddingProviderUnavailable("provider unavailable")
+
+
+def test_real_embedding_provider_can_fall_back_to_hashing() -> None:
+    provider = FallbackEmbeddingProvider(UnavailableEmbeddingProvider(), HashingEmbeddingProvider())
+
+    vector = provider.embed("failed build logs")
+
+    assert vector
+    assert provider.fallback_count == 1
+
+
+class FakeOpenSearchToolIndex(OpenSearchToolEmbeddingIndex):
+    def __init__(self) -> None:
+        super().__init__("http://opensearch:9200")
+        self.indexed: list[str] = []
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        if method == "PUT":
+            assert body is not None
+            self.indexed.append(str(body["name"]))
+            return {"result": "created"}
+        assert path.endswith("/_search")
+        return {
+            "hits": {
+                "hits": [
+                    {"_score": 3.0, "_source": {"name": "get_pipeline_logs"}},
+                    {"_score": 1.5, "_source": {"name": "get_build_status"}},
+                ]
+            }
+        }
+
+
+def test_opensearch_tool_index_indexes_and_searches_documents() -> None:
+    index = FakeOpenSearchToolIndex()
+    service = ToolDiscoveryService(index=index)
+
+    response = service.retrieve("failed build logs", top_k=2)
+
+    assert "get_pipeline_logs" in index.indexed
+    assert [result.tool.name for result in response.ranked_tools][:2] == [
+        "get_pipeline_logs",
+        "get_build_status",
+    ]
 
 
 def test_tool_discovery_emits_prometheus_metrics() -> None:

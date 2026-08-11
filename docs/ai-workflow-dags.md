@@ -48,6 +48,26 @@ flowchart TD
 
 The exact nodes depend on the policy-filtered tools retrieved for the request.
 
+## Planner Modes
+
+Default test/local mode:
+
+```env
+LLM_PLANNER_PROVIDER=deterministic
+```
+
+Live demo mode:
+
+```env
+OPENAI_API_KEY=your-valid-openai-key
+LLM_PLANNER_PROVIDER=openai
+```
+
+`LLMWorkflowPlanner` calls the provider for JSON only, then normalizes common response shapes
+(`nodes`, `steps`, or `tool_sequence`) into the strict `WorkflowPlanDraft` schema. That normalized
+draft is still untrusted. The backend validator then checks tool existence, discovered-tool
+membership, arguments, DAG structure, size limits, RBAC, risk, and approval policy.
+
 Policy can transform a proposed plan:
 
 ```mermaid
@@ -110,6 +130,9 @@ POST /api/v1/workflows/{workflow_id}/cancel
 
 - Tool discovery happens before planning, so the planner only sees relevant authorized tools.
 - Planner output is a strict Pydantic model, not free-form text.
+- Live LLM output is schema-normalized only to tolerate JSON shape differences; trusted risk,
+  approval, retry, timeout, executable status, and server metadata still come from the backend
+  registry.
 - Validation rejects unknown tools, undiscovered tools, disabled tools, invalid arguments, cycles,
   missing dependencies, and oversized workflows.
 - Policy evaluation determines `ALLOW`, `ALLOW_WITH_APPROVAL`, `DENY`, or

@@ -34,6 +34,17 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-4.1-mini"
     llm_timeout_seconds: int = 20
+    llm_planner_provider: str = "deterministic"
+
+    embedding_provider: str = "hashing"
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_timeout_seconds: int = 20
+
+    opensearch_tool_index: str = "mcp-tools"
+    opensearch_knowledge_index: str = "engineering-knowledge"
+    tool_discovery_index_backend: str = "memory"
+    knowledge_index_backend: str = "memory"
+    rag_include_repository_docs: bool = True
 
     github_token: str = Field(default="", repr=False)
     github_owner: str = ""

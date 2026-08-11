@@ -23,7 +23,7 @@ from mcp_ops_ai_agent.provider import DeterministicMockProvider, OpenAIChatProvi
 from mcp_ops_ai_agent.service import AiEngineeringAgent
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService, evaluate_tool_discovery
 from mcp_ops_ai_agent.workflows.models import Workflow, WorkflowPlanRequest
-from mcp_ops_ai_agent.workflows.planner import PlannerOutputError
+from mcp_ops_ai_agent.workflows.planner import PlannerOutputError, workflow_planner_from_settings
 from mcp_ops_ai_agent.workflows.service import WorkflowNotFoundError, WorkflowPlanningService
 from mcp_ops_ai_agent.workflows.validator import WorkflowValidationError
 from mcp_ops_auth.rbac import Role
@@ -70,6 +70,7 @@ workflow_service = WorkflowPlanningService(
     discovery=tool_discovery,
     capability_graph=capability_graph,
     rag=engineering_rag,
+    planner=workflow_planner_from_settings(settings),
     repository=workflow_repository,
 )
 

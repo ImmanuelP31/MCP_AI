@@ -54,13 +54,30 @@ their MCP servers exist. The gateway rejects non-executable catalog entries.
 The retrieval service combines:
 
 - deterministic vector similarity from `HashingEmbeddingProvider`
+- optional provider-backed embeddings from `OpenAIEmbeddingProvider`
 - lexical/BM25-style scoring
 - metadata boosts for tags, category, and tool name
 - server/category filters
 - role and policy filtering
 
-OpenSearch is represented through `OpenSearchToolEmbeddingIndex`. The local runtime falls back to
-the deterministic in-memory index if OpenSearch is unavailable.
+OpenSearch is supported through `OpenSearchToolEmbeddingIndex`. When
+`TOOL_DISCOVERY_INDEX_BACKEND=opensearch`, normalized MCP tool documents are indexed into
+`OPENSEARCH_TOOL_INDEX` and searched through OpenSearch lexical scoring. If OpenSearch is
+unavailable, retrieval falls back to the deterministic in-memory index.
+
+Provider switches:
+
+```env
+EMBEDDING_PROVIDER=hashing
+TOOL_DISCOVERY_INDEX_BACKEND=memory
+```
+
+Live demo switches:
+
+```env
+EMBEDDING_PROVIDER=openai
+TOOL_DISCOVERY_INDEX_BACKEND=opensearch
+```
 
 ## API
 
@@ -121,4 +138,8 @@ Run through Python:
 
 ```powershell
 python -m pytest tests/unit/test_tool_discovery.py
+python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
+
+Real-mode evaluation requires a valid provider key. The deterministic hashing provider remains the
+CI fallback and should be used for normal unit tests.
