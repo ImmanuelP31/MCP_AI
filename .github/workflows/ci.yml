@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Lint
+        run: python -m ruff check .
+      - name: Type check
+        run: python -m mypy apps packages services tests scripts
+      - name: Python security scan
+        run: python -m bandit -c pyproject.toml -r apps packages services scripts tests
+      - name: Python dependency audit
+        run: python -m pip_audit
+      - name: Unit, contract, and integration tests
+        run: python -m pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Dependency audit
+        run: npm audit --audit-level=moderate
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke test
+        run: npm run e2e
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose
+        run: docker compose -f infra/docker/docker-compose.dev.yml config
+      - name: Build application images
+        run: docker compose -f infra/docker/docker-compose.dev.yml build
