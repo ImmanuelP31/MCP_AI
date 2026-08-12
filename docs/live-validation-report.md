@@ -12,10 +12,10 @@ Generated during the final presentation-readiness pass.
 | GitHub vertical-slice demo | Live validated | Failed build investigation, issue creation, approval-gated rerun request, approval, and rerun execution succeeded. |
 | Repository-document RAG | Live validated | 34 bounded repository docs/workflows ingested. |
 | OpenSearch RAG backend | Live validated | Query returned `index_backend: opensearch` with the controlled failing workflow as top result. |
-| OpenAI planner | Blocked | Provider endpoint reached, but returned HTTP 401 with the configured key. |
-| OpenAI embeddings | Blocked | Embedding endpoint reached, but returned HTTP 401 with the configured key. |
-| 30-50 live LLM benchmark | Blocked | Cannot run honestly until OpenAI authentication succeeds. |
-| Hashing vs real embedding comparison | Partially blocked | Hashing baseline is available; real OpenAI embedding run is blocked by HTTP 401. |
+| OpenAI planner | Blocked | Project config now reads the `.env` key instead of the stale machine environment key; provider calls now return HTTP 429. |
+| OpenAI embeddings | Blocked | Embedding endpoint now returns HTTP 429, indicating quota/rate limiting rather than invalid authentication. |
+| 30-50 live LLM benchmark | Blocked | Cannot run honestly until OpenAI quota/rate limits are resolved. |
+| Hashing vs real embedding comparison | Partially blocked | Hashing baseline is available; real OpenAI embedding run is blocked by HTTP 429. |
 
 ## OpenSearch RAG Evidence
 
@@ -60,17 +60,20 @@ Measured output summary:
 
 ## OpenAI Failure Analysis
 
-The OpenAI key was present in `.env`, but both provider endpoints rejected it:
+The first 401 failure was caused by a stale machine-level `OPENAI_API_KEY` overriding the project
+`.env` key. Project settings now load `.env` before inherited environment variables, and the
+effective settings key matches the `.env` key.
 
-- Planner endpoint: HTTP 401
-- Embeddings endpoint: HTTP 401
+After that fix, the OpenAI embedding endpoint returned HTTP 429:
 
-This is an authentication/configuration failure, not an LLM quality result. The benchmark runner
-correctly records provider failures instead of fabricating successful model metrics.
+- Embeddings endpoint: HTTP 429
 
-## Required Rerun After Key Rotation
+This is a quota/rate-limit condition, not an invalid-key authentication failure. The benchmark
+runner correctly records provider failures instead of fabricating successful model metrics.
 
-After replacing `OPENAI_API_KEY` with a valid key:
+## Required Rerun After OpenAI Quota Is Available
+
+After adding billing/credits or using a key with available quota:
 
 ```powershell
 $env:LLM_PLANNER_PROVIDER="openai"

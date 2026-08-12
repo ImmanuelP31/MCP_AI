@@ -141,7 +141,7 @@ Then show:
 - OpenSearch RAG: live validated with `index_backend: opensearch` using
   `OPENSEARCH_URL=http://localhost:9200`.
 - Controlled failing workflow: pushed to `main` and dispatched successfully.
-- OpenAI live planner/embedding smoke: provider paths reached OpenAI but returned HTTP 401 with the
-  configured key. Replace or rotate `OPENAI_API_KEY` before presenting live LLM or embedding
-  metrics.
+- OpenAI live planner/embedding smoke: project config now reads the `.env` key instead of the stale
+  machine-level key, but OpenAI returned HTTP 429. Add quota or use a key with available quota
+  before presenting live LLM or embedding metrics.
 - Evaluation: mock baseline is generated and clearly labeled.

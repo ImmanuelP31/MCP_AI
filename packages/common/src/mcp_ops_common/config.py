@@ -1,14 +1,37 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal, cast
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 EnvironmentName = Literal["development", "test", "staging", "production"]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        del settings_cls
+
+        def dotenv_openai_key() -> dict[str, Any]:
+            data = dotenv_settings()
+            return {"openai_api_key": data["openai_api_key"]} if "openai_api_key" in data else {}
+
+        return (
+            init_settings,
+            cast(PydanticBaseSettingsSource, dotenv_openai_key),
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     environment: EnvironmentName = "development"
     log_level: str = "INFO"

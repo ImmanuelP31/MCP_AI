@@ -91,6 +91,6 @@ presented as LLM quality metrics.
   controlled failing GitHub Actions workflow was the top result for the demo query.
 - OpenSearch-backed RAG was live validated with `index_backend: opensearch` using
   `OPENSEARCH_URL=http://localhost:9200`.
-- OpenAI real-mode planner/evaluation and embedding smoke reached the provider but returned HTTP
-  401 with the configured key. Replace or rotate `OPENAI_API_KEY` before presenting live LLM or
-  embedding benchmark numbers.
+- OpenAI real-mode planner/evaluation and embedding smoke reached the provider. The stale
+  machine-level key override was fixed, and the provider then returned HTTP 429. Add quota or use a
+  key with available quota before presenting live LLM or embedding benchmark numbers.
