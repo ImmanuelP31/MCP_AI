@@ -95,9 +95,12 @@ KNOWLEDGE_INDEX_BACKEND=memory
 For a live AI demo, set:
 
 ```env
-OPENAI_API_KEY=your-valid-openai-key
-LLM_PLANNER_PROVIDER=openai
-EMBEDDING_PROVIDER=openai
+GEMINI_API_KEY=your-valid-gemini-key
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+LLM_PROVIDER=gemini
+LLM_PLANNER_PROVIDER=gemini
+EMBEDDING_PROVIDER=gemini
 TOOL_DISCOVERY_INDEX_BACKEND=opensearch
 KNOWLEDGE_INDEX_BACKEND=opensearch
 ```
@@ -175,11 +178,12 @@ The normal test suite uses deterministic offline GitHub data. Live GitHub calls 
 Live smoke commands:
 
 ```powershell
-$env:LLM_PLANNER_PROVIDER="openai"
-$env:EMBEDDING_PROVIDER="openai"
+$env:LLM_PLANNER_PROVIDER="gemini"
+$env:EMBEDDING_PROVIDER="gemini"
+$env:GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 
-If OpenAI returns HTTP 401, rotate or replace `OPENAI_API_KEY`. If OpenAI returns HTTP 429 with
-`credit_balance_exhausted`, add API credits before running live LLM/embedding benchmarks. If GitHub
+If Gemini returns HTTP 401/403, rotate or replace `GEMINI_API_KEY`. If Gemini returns quota or
+rate-limit errors, reduce the benchmark limit or add quota before running live benchmarks. If GitHub
 has no failed workflow run, the live GitHub smoke will correctly report no latest failed build.

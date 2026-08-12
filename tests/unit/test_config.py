@@ -11,9 +11,18 @@ def test_dotenv_overrides_inherited_environment_for_local_project(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-stale-machine-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-stale-machine-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "stale-gemini-machine-key")
     env_file = tmp_path / ".env"
-    env_file.write_text("OPENAI_API_KEY=sk-project-file-key\n", encoding="utf-8")
+    env_file.write_text(
+        "OPENAI_API_KEY=sk-project-file-key\n"
+        "OPENROUTER_API_KEY=sk-or-project-file-key\n"
+        "GEMINI_API_KEY=project-gemini-file-key\n",
+        encoding="utf-8",
+    )
 
     settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
 
     assert settings.openai_api_key == "sk-project-file-key"
+    assert settings.openrouter_api_key == "sk-or-project-file-key"
+    assert settings.gemini_api_key == "project-gemini-file-key"

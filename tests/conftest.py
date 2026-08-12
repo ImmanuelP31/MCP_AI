@@ -5,6 +5,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ["GITHUB_TOKEN"] = ""  # nosec B105
+os.environ["LLM_PROVIDER"] = "deterministic"
+os.environ["LLM_PLANNER_PROVIDER"] = "deterministic"
+os.environ["EMBEDDING_PROVIDER"] = "hashing"
+os.environ["TOOL_DISCOVERY_INDEX_BACKEND"] = "memory"
+os.environ["KNOWLEDGE_INDEX_BACKEND"] = "memory"
 
 SOURCE_ROOTS = [
     ROOT / "apps" / "api" / "src",

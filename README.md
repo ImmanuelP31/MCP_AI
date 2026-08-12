@@ -1,14 +1,35 @@
 # MCP Engineering Operations Platform
 
-Enterprise AI Engineering Control Plane for governed engineering automation across devices, repositories, CI/CD workflows, documentation, tickets, approvals, and MCP tools.
+An Enterprise AI Engineering Control Plane for governed developer operations across GitHub, CI/CD,
+engineering documentation, tickets, approvals, simulated devices, and MCP tools.
 
-## Problem Statement
+The platform demonstrates a production-style AI architecture where a model can plan engineering
+work, but cannot bypass tool governance. Natural-language requests are converted into typed,
+policy-checked workflows that execute only through governed MCP tools.
+
+## Problem
 
 Modern engineering teams want natural-language operations such as:
 
 > Check the latest failed build for payments-api, inspect the relevant commit changes and engineering documentation, create a ticket if the failure is code-related, prepare a staging deployment workflow after tests pass, and request my approval before execution.
 
-The hard part is not asking an LLM to produce steps. The hard part is making sure the model cannot bypass authentication, authorization, policy, approvals, audit, idempotency, or production safety boundaries.
+The hard part is not asking an LLM to produce steps. The hard part is making sure the model cannot
+bypass authentication, authorization, policy, approvals, audit, idempotency, or production safety
+boundaries.
+
+This project focuses on that control layer:
+
+```text
+natural language
+-> semantic MCP tool discovery
+-> engineering RAG
+-> typed workflow DAG
+-> capability graph validation
+-> RBAC and policy evaluation
+-> human approval where required
+-> MCP execution
+-> audit trail and metrics
+```
 
 ## Architecture
 
@@ -37,30 +58,39 @@ flowchart LR
     RAG --> OpenSearch["OpenSearch"]
 ```
 
-Core services:
+## Service Map
 
 - `apps/api`: FastAPI backend, AI orchestration APIs, workflow APIs, capability APIs, readiness, metrics.
 - `apps/frontend`: React/Vite enterprise dashboard.
 - `services/mcp-gateway`: governed MCP routing, RBAC, policy, approvals, rate limiting, idempotency, audit.
-- `services/device-mcp`, `services/diagnostics-mcp`, `services/knowledge-mcp`, `services/ticket-mcp`: domain MCP servers.
+- `services/device-mcp`, `services/diagnostics-mcp`, `services/knowledge-mcp`, `services/ticket-mcp`,
+  `services/repository-mcp`: domain MCP servers.
 - `services/simulator-gateway`: deterministic 50-device engineering simulator.
 - `packages/*`: shared schemas, policy, observability, events, approvals, search, and auth helpers.
 - `evaluation`: deterministic benchmark datasets, runner, metrics, JSON/CSV/Markdown reports.
 
-## Major Features
+## What It Demonstrates
 
-- Governed MCP gateway with tool registry, permissions, risk classes, rate limits, idempotency, and audit.
-- GitHub-backed repository/CI tools for failed-build investigation, commit inspection, issue creation, and approval-gated workflow reruns.
-- Executable GitHub/CI vertical slice: build status, job logs, commits, changed files, diff summaries, bounded tests, deterministic failure analysis, issue creation, and approval-gated reruns.
-- Semantic MCP tool discovery so the planner receives only relevant, authorized tools, with deterministic hashing embeddings for CI and optional OpenAI embeddings for live demos.
-- Engineering Knowledge RAG over repository, CI/CD, deployment, ownership, testing, and MCP documentation, with memory or OpenSearch-backed indexes.
-- Typed AI-generated workflow DAGs with deterministic and live LLM planner modes, schema validation, graph validation, argument validation, and policy validation.
-- Policy-constrained workflow transformation: AI recommends, policy authorizes, human approves, MCP executes, audit records.
-- Capability graph for policy-compliant paths across repositories, pipelines, deployments, tickets, documentation, MCP servers, and tools.
-- Resilient workflow execution with checkpoints, retries, approval waits, compensation, resume, and node-level retry.
-- MCP-specific security hardening for malicious metadata, prompt injection, hallucinated tools, argument tampering, approval replay, and sensitive-data redaction.
-- Prometheus metrics and Grafana dashboard provisioning.
-- Deterministic mock evaluation framework with 330 enterprise engineering scenarios.
+- **Governed MCP execution**: tool registry, permissions, risk classes, rate limits, idempotency,
+  audit logging, and approval routing.
+- **Gemini-backed AI planning**: live workflow planning, answer generation, and embeddings through
+  provider abstractions, with deterministic fallback for CI.
+- **Semantic MCP tool discovery**: the planner receives only relevant, role-authorized tools instead
+  of the entire tool catalog.
+- **Engineering RAG**: repository docs, CI/CD docs, deployment policies, service ownership, and MCP
+  documentation are retrieved with citations before planning.
+- **Typed workflow DAGs**: AI output is validated with Pydantic schemas, argument checks, DAG checks,
+  RBAC checks, and policy checks before execution.
+- **Capability graph constraints**: workflow paths are checked against resources, tools,
+  environments, risk, and policy.
+- **GitHub vertical slice**: failed-build investigation, workflow logs, commits, changed files, issue
+  creation, and approval-gated workflow reruns.
+- **Resilient execution**: checkpoints, retries, approval waits, compensation hooks, resume, and
+  node-level retry.
+- **MCP security hardening**: malicious metadata detection, prompt-injection containment,
+  hallucinated-tool rejection, argument tampering checks, approval replay protection, and redaction.
+- **Observability and evaluation**: Prometheus/Grafana plus a deterministic benchmark framework with
+  330 enterprise engineering scenarios.
 
 ## AI And MCP Model
 
@@ -69,6 +99,10 @@ The LLM is deliberately not an authority. It receives a policy-filtered tool sub
 Trust boundary:
 
 **AI recommends. Policy authorizes. Human approves. MCP executes. Audit records.**
+
+That trust boundary is the core design principle. The model can propose a workflow, but trusted
+backend services decide whether each tool exists, whether the actor is allowed to use it, whether the
+target environment changes the risk, whether approval is required, and whether execution is safe.
 
 ## Governance And Security
 
@@ -85,7 +119,7 @@ High-risk and critical operations require approval. Approval is bound to workflo
 
 See [docs/security.md](docs/security.md) and [docs/threat-model.md](docs/threat-model.md).
 
-## Setup
+## Quickstart
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -101,9 +135,17 @@ GITHUB_OWNER=ImmanuelP31
 GITHUB_REPO=MCP_AI
 GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target
 
-OPENAI_API_KEY=your-valid-openai-key
-LLM_PLANNER_PROVIDER=openai
-EMBEDDING_PROVIDER=openai
+GEMINI_API_KEY=your-valid-gemini-key
+GEMINI_MODEL=gemini-2.5-flash
+LLM_PLANNER_PROVIDER=gemini
+LLM_PROVIDER=gemini
+EMBEDDING_PROVIDER=gemini
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+
+# Alternative live planner providers.
+OPENROUTER_API_KEY=your-valid-openrouter-key
+OPENROUTER_MODEL=openrouter/auto
+
 TOOL_DISCOVERY_INDEX_BACKEND=opensearch
 KNOWLEDGE_INDEX_BACKEND=opensearch
 ```
@@ -117,7 +159,7 @@ TOOL_DISCOVERY_INDEX_BACKEND=memory
 KNOWLEDGE_INDEX_BACKEND=memory
 ```
 
-Local URLs:
+Open the system:
 
 - Frontend: http://localhost:8080
 - API: http://localhost:18000
@@ -144,7 +186,7 @@ docker compose -f infra/docker/docker-compose.dev.yml up -d --build
 
 ## Demo Workflow
 
-Polished demonstration:
+Best five-minute demonstration:
 
 1. Submit the natural-language request about the latest failed `payments-api` build.
 2. Show semantic MCP discovery ranking CI/CD, repository, documentation, ticket, test, and deployment tools.
@@ -153,20 +195,21 @@ Polished demonstration:
 5. Show policy decisions, including approval required before staging execution.
 6. Approve the operation as an authorized human.
 7. Execute through MCP gateway.
-8. Show audit trail and Prometheus metrics.
+8. Show audit trail, policy records, and Prometheus metrics.
 
 See [docs/demo-guide.md](docs/demo-guide.md).
 For the GitHub-backed demo slice, see [docs/github-demo-integration.md](docs/github-demo-integration.md)
 and [docs/final-live-demo-runbook.md](docs/final-live-demo-runbook.md).
 
-## Screenshots
+## Dashboard Views
 
-Screenshot placeholders for portfolio/demo documentation:
-
-- Dashboard fleet and system health.
-- Tool discovery ranking view.
-- Workflow DAG with policy decisions.
+- Fleet and system health dashboard.
+- Semantic tool discovery debugger.
+- Workflow DAG with policy decisions and approval state.
+- Capability graph inspector.
+- Engineering RAG search with citations.
 - Approval center.
+- Tool registry and governance view.
 - Audit explorer.
 - Evaluation metrics page.
 
@@ -188,10 +231,22 @@ python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 
 See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 
+## Technology Stack
+
+| Layer | Tools |
+| --- | --- |
+| Frontend | React, TypeScript, Vite, lucide-react |
+| API | FastAPI, Pydantic, SQLAlchemy, Alembic |
+| AI | Gemini planner, Gemini embeddings, deterministic CI fallback |
+| MCP | Official Python MCP SDK, domain MCP servers, governed MCP gateway |
+| Data | PostgreSQL, Redis, Kafka, OpenSearch |
+| Observability | Prometheus, Grafana, structured logs, request/correlation IDs |
+| DevOps | Docker Compose, pytest, Vitest, Playwright, ruff, mypy, Bandit |
+
 ## Limitations
 
 - Current benchmark results are deterministic mock results unless a live model provider is configured.
-- Live LLM and OpenAI embedding benchmarks require a valid OpenAI key with available quota; the project now reads the `.env` key correctly, but the provider returned HTTP 429 `credit_balance_exhausted` during the final smoke attempt, so only deterministic benchmark results are recorded.
+- Live LLM planning and live embeddings now use Gemini for the recommended demo path. OpenAI remains a legacy-compatible provider in code, but no OpenAI key is required for the current live demo.
 - OpenSearch-backed repository-document RAG was live validated locally with `OPENSEARCH_URL=http://localhost:9200`; Docker-internal service names such as `http://opensearch:9200` are for containers, not host-run scripts.
 - Live GitHub failed-build investigation was validated against the dedicated demo target `ImmanuelP31/mcp-ai-demo-target` with the controlled failing workflow, issue creation, approval-gated rerun request, approval, and rerun execution.
 - The local simulator and synthetic engineering corpus are demo/pilot assets.

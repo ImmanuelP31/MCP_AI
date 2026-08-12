@@ -7,7 +7,9 @@ from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService, evaluate_tool_
 from mcp_ops_ai_agent.tool_discovery.embeddings import (
     EmbeddingProviderUnavailable,
     FallbackEmbeddingProvider,
+    GeminiEmbeddingProvider,
     HashingEmbeddingProvider,
+    embedding_provider_from_settings,
 )
 from mcp_ops_ai_agent.tool_discovery.index import (
     OpenSearchToolEmbeddingIndex,
@@ -17,6 +19,7 @@ from mcp_ops_ai_agent.tool_discovery.index import (
 from mcp_ops_ai_agent.tool_discovery.models import ToolDiscoveryFilters, ToolDocument
 from mcp_ops_ai_agent.tool_discovery.retrieval import lexical_score
 from mcp_ops_ai_agent.tool_discovery.service import ToolMetadataError
+from mcp_ops_common.config import Settings
 from mcp_ops_observability.metrics import metrics_response
 from mcp_ops_policy.tool_registry import RiskLevel, ToolMetadata
 
@@ -141,6 +144,36 @@ def test_real_embedding_provider_can_fall_back_to_hashing() -> None:
 
     assert vector
     assert provider.fallback_count == 1
+
+
+class FakeGeminiEmbeddingProvider(GeminiEmbeddingProvider):
+    def __init__(self) -> None:
+        super().__init__(api_key="gemini-test-key", model="gemini-embedding-test")
+
+    def _post_json(self, path: str, payload: dict[str, object]) -> dict[str, Any]:
+        assert path == "/v1beta/models/gemini-embedding-test:embedContent"
+        assert payload["model"] == "models/gemini-embedding-test"
+        return {"embedding": {"values": [3.0, 4.0]}}
+
+
+def test_gemini_embedding_provider_parses_and_normalizes_values() -> None:
+    vector = FakeGeminiEmbeddingProvider().embed("failed build logs")
+
+    assert vector == (0.6, 0.8)
+
+
+def test_embedding_provider_from_settings_supports_gemini_with_hashing_fallback() -> None:
+    provider = embedding_provider_from_settings(
+        Settings(
+            embedding_provider="gemini",
+            gemini_api_key="",
+            gemini_embedding_model="gemini-embedding-test",
+        )
+    )
+
+    vector = provider.embed("failed build logs")
+
+    assert vector
 
 
 class FakeOpenSearchToolIndex(OpenSearchToolEmbeddingIndex):

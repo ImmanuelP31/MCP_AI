@@ -115,10 +115,17 @@ def _mcp_server(name: str, module_name: str) -> ComponentCheck:
 
 def _model_provider(settings: Settings) -> ComponentCheck:
     provider = settings.llm_provider.lower()
-    if provider == "openai" and not settings.openai_api_key:
-        return ComponentCheck(
-            "model_provider",
-            "misconfigured",
-            {"provider": provider, "reason": "OPENAI_API_KEY is not configured"},
-        )
+    required_keys = {
+        "gemini": (settings.gemini_api_key, "GEMINI_API_KEY"),
+        "openrouter": (settings.openrouter_api_key, "OPENROUTER_API_KEY"),
+        "openai": (settings.openai_api_key, "OPENAI_API_KEY"),
+    }
+    if provider in required_keys:
+        key, env_name = required_keys[provider]
+        if not key:
+            return ComponentCheck(
+                "model_provider",
+                "misconfigured",
+                {"provider": provider, "reason": f"{env_name} is not configured"},
+            )
     return ComponentCheck("model_provider", "ready", {"provider": provider})

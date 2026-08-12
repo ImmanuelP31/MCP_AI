@@ -38,7 +38,7 @@ Core files:
 The local implementation uses deterministic hashing embeddings and BM25-style lexical scoring so
 tests do not require live LLM or OpenSearch access. `OpenSearchKnowledgeIndex` defines the
 production boundary for OpenSearch-backed vector/BM25 storage and falls back safely in this local
-runtime. Live demos can use OpenAI embeddings through the provider abstraction.
+runtime. Live demos can use Gemini embeddings through the provider abstraction.
 
 ## Repository Documentation Ingestion
 

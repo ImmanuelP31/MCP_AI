@@ -59,9 +59,13 @@ LLM_PLANNER_PROVIDER=deterministic
 Live demo mode:
 
 ```env
-OPENAI_API_KEY=your-valid-openai-key
-LLM_PLANNER_PROVIDER=openai
+GEMINI_API_KEY=your-valid-gemini-key
+GEMINI_MODEL=gemini-2.5-flash
+LLM_PLANNER_PROVIDER=gemini
 ```
+
+OpenRouter remains supported for planner comparison by setting `OPENROUTER_API_KEY` and
+`LLM_PLANNER_PROVIDER=openrouter`.
 
 `LLMWorkflowPlanner` calls the provider for JSON only, then normalizes common response shapes
 (`nodes`, `steps`, or `tool_sequence`) into the strict `WorkflowPlanDraft` schema. That normalized

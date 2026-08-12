@@ -9,10 +9,12 @@ from mcp_ops_ai_agent.workflows.planner import (
     JsonWorkflowPlanner,
     LLMWorkflowPlanner,
     PlannerOutputError,
+    workflow_planner_from_settings,
 )
 from mcp_ops_ai_agent.workflows.policy import WorkflowPolicyEvaluator
 from mcp_ops_ai_agent.workflows.service import WorkflowPlanningService
 from mcp_ops_ai_agent.workflows.validator import WorkflowValidationError, WorkflowValidator
+from mcp_ops_common.config import Settings
 from mcp_ops_observability.metrics import metrics_response
 
 
@@ -267,6 +269,30 @@ def test_llm_workflow_planner_fills_trusted_tool_metadata_and_arguments() -> Non
     assert node.risk_level == "READ_ONLY"
     assert node.approval_required is False
     assert node.arguments == {"repository": "ImmanuelP31/MCP_AI"}
+
+
+def test_workflow_planner_from_settings_supports_openrouter_provider() -> None:
+    planner = workflow_planner_from_settings(
+        Settings(
+            llm_planner_provider="openrouter",
+            openrouter_api_key="sk-or-test",
+            openrouter_model="openrouter/test-model",
+        )
+    )
+
+    assert planner.planner_model == "llm-workflow-planner:openrouter/test-model"
+
+
+def test_workflow_planner_from_settings_supports_gemini_provider() -> None:
+    planner = workflow_planner_from_settings(
+        Settings(
+            llm_planner_provider="gemini",
+            gemini_api_key="gemini-test-key",
+            gemini_model="gemini-test-model",
+        )
+    )
+
+    assert planner.planner_model == "llm-workflow-planner:gemini-test-model"
 
 
 def test_planner_hallucinated_tool_is_rejected() -> None:

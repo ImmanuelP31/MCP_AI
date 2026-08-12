@@ -143,7 +143,7 @@ Current capabilities:
 
 - bounded natural-language intent parsing
 - deterministic mock provider for tests and demos
-- optional OpenAI chat provider for answer generation using sanitized context
+- optional Gemini chat provider for answer generation using sanitized context
 - gateway-only tool execution
 - selected tool route explanations
 - confidence scores

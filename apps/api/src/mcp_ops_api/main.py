@@ -19,7 +19,7 @@ from mcp_ops_ai_agent.engineering_rag.models import (
     KnowledgeSearchMode,
 )
 from mcp_ops_ai_agent.evaluation import evaluate_agent
-from mcp_ops_ai_agent.provider import DeterministicMockProvider, OpenAIChatProvider
+from mcp_ops_ai_agent.provider import DeterministicMockProvider, GeminiChatProvider
 from mcp_ops_ai_agent.service import AiEngineeringAgent
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService, evaluate_tool_discovery
 from mcp_ops_ai_agent.workflows.models import Workflow, WorkflowPlanRequest
@@ -40,8 +40,8 @@ configure_logging()
 
 settings = get_settings()
 provider = (
-    OpenAIChatProvider(settings)
-    if settings.llm_provider.lower() == "openai"
+    GeminiChatProvider(settings)
+    if settings.llm_provider.lower() == "gemini"
     else DeterministicMockProvider()
 )
 agent = AiEngineeringAgent(provider=provider)

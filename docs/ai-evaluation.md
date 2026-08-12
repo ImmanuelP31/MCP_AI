@@ -46,15 +46,17 @@ These are mock-mode results from `evaluation/results/latest.json`, not live LLM 
 
 ## Live Provider Status
 
-The live planner and embedding-provider paths are implemented behind the same typed workflow and
-retrieval abstractions used by deterministic mode. In this environment, an explicit OpenAI smoke
-attempt reached the provider but returned HTTP 401, so no live LLM quality result is recorded.
+The live planner path is implemented behind the same typed workflow schema used by deterministic
+mode. The recommended live provider is Gemini, with OpenRouter available for planner-only
+comparison. The embedding-provider path now supports Gemini embeddings for live retrieval
+benchmarks and deterministic hashing for CI.
 
-Do not present provider-authentication failures as model behavior. After replacing the key, rerun:
+Do not present provider-authentication or quota failures as model behavior. For a Gemini
+planner smoke, rerun:
 
 ```powershell
-$env:LLM_PLANNER_PROVIDER="openai"
-$env:EMBEDDING_PROVIDER="openai"
+$env:LLM_PLANNER_PROVIDER="gemini"
+$env:GEMINI_MODEL="gemini-2.5-flash"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 
@@ -67,8 +69,25 @@ python -m evaluation.run --config semantic_rag_graph
 Live provider smoke:
 
 ```powershell
-$env:LLM_PLANNER_PROVIDER="openai"
-$env:EMBEDDING_PROVIDER="openai"
+$env:LLM_PLANNER_PROVIDER="gemini"
+$env:GEMINI_MODEL="gemini-2.5-flash"
+python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
+```
+
+OpenRouter planner smoke:
+
+```powershell
+$env:LLM_PLANNER_PROVIDER="openrouter"
+$env:OPENROUTER_MODEL="openrouter/auto"
+python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
+```
+
+Gemini planner and embedding comparison:
+
+```powershell
+$env:LLM_PLANNER_PROVIDER="gemini"
+$env:EMBEDDING_PROVIDER="gemini"
+$env:GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 
@@ -80,8 +99,8 @@ Outputs:
 
 For a real benchmark, configure a valid provider key, run the same dataset/configuration used for
 mock mode, and label/report the provider, model, date, latency, token usage, and estimated cost.
-Provider errors such as HTTP 401 are infrastructure/authentication failures and should not be
-presented as LLM quality metrics.
+Provider errors such as HTTP 401 or quota/rate-limit responses are
+infrastructure/authentication failures and should not be presented as LLM quality metrics.
 
 ## Verified Live Integration Status
 
@@ -91,6 +110,4 @@ presented as LLM quality metrics.
   controlled failing GitHub Actions workflow was the top result for the demo query.
 - OpenSearch-backed RAG was live validated with `index_backend: opensearch` using
   `OPENSEARCH_URL=http://localhost:9200`.
-- OpenAI real-mode planner/evaluation and embedding smoke reached the provider. The stale
-  machine-level key override was fixed, and the provider then returned HTTP 429. Add quota or use a
-  key with available quota before presenting live LLM or embedding benchmark numbers.
+- Gemini is the recommended live provider for both planner and embeddings.

@@ -36,6 +36,8 @@ class WorkflowPlanCompletionClient(Protocol):
 
 class OpenAIWorkflowPlanClient:
     _host = "api.openai.com"
+    _path = "/v1/chat/completions"
+    _provider_name = "OpenAI"
 
     def __init__(self, settings: Settings) -> None:
         self.api_key = settings.openai_api_key
@@ -44,7 +46,9 @@ class OpenAIWorkflowPlanClient:
 
     def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
         if not self.api_key:
-            raise PlannerOutputError("OpenAI API key is not configured for live planning.")
+            raise PlannerOutputError(
+                f"{self._provider_name} API key is not configured for live planning."
+            )
         import http.client
         import ssl
 
@@ -72,12 +76,9 @@ class OpenAIWorkflowPlanClient:
         try:
             connection.request(
                 "POST",
-                "/v1/chat/completions",
+                self._path,
                 body=body,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=self._headers(),
             )
             response = connection.getresponse()
             raw = response.read(3_000_000)
@@ -96,6 +97,105 @@ class OpenAIWorkflowPlanClient:
             raise PlannerOutputError("Planner provider response shape was not recognized.") from exc
         if not isinstance(content, str):
             raise PlannerOutputError("Planner provider content must be a JSON string.")
+        return content
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+
+class OpenRouterWorkflowPlanClient(OpenAIWorkflowPlanClient):
+    _host = "openrouter.ai"
+    _path = "/api/v1/chat/completions"
+    _provider_name = "OpenRouter"
+
+    def __init__(self, settings: Settings) -> None:
+        self.api_key = settings.openrouter_api_key
+        self.model = settings.openrouter_model
+        self.timeout_seconds = settings.llm_timeout_seconds
+        self.app_url = settings.openrouter_app_url
+        self.app_name = settings.openrouter_app_name
+
+    def _headers(self) -> dict[str, str]:
+        headers = super()._headers()
+        if self.app_url:
+            headers["HTTP-Referer"] = self.app_url
+        if self.app_name:
+            headers["X-OpenRouter-Title"] = self.app_name
+        return headers
+
+
+class GeminiWorkflowPlanClient:
+    _host = "generativelanguage.googleapis.com"
+
+    def __init__(self, settings: Settings) -> None:
+        self.api_key = settings.gemini_api_key
+        self.model = settings.gemini_model
+        self.timeout_seconds = settings.llm_timeout_seconds
+
+    def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
+        if not self.api_key:
+            raise PlannerOutputError("Gemini API key is not configured for live planning.")
+        import http.client
+        import ssl
+        from urllib.parse import quote
+
+        prompt = (
+            f"{system_prompt}\n\n"
+            "User payload JSON follows. Return only the workflow JSON object.\n"
+            f"{json.dumps(user_payload, sort_keys=True)}"
+        )
+        body = json.dumps(
+            {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [{"text": prompt}],
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 1800,
+                    "responseMimeType": "application/json",
+                },
+            }
+        ).encode("utf-8")
+        context = ssl.create_default_context()
+        connection = http.client.HTTPSConnection(
+            self._host,
+            timeout=self.timeout_seconds,
+            context=context,
+        )
+        try:
+            connection.request(
+                "POST",
+                f"/v1beta/models/{quote(self.model, safe='')}:generateContent",
+                body=body,
+                headers={
+                    "x-goog-api-key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            raw = response.read(3_000_000)
+        except OSError as exc:
+            raise PlannerOutputError(
+                f"Planner provider request failed: {exc.__class__.__name__}."
+            ) from exc
+        finally:
+            connection.close()
+        if response.status >= 400:
+            raise PlannerOutputError(f"Planner provider returned HTTP {response.status}.")
+        decoded = json.loads(raw.decode("utf-8") or "{}")
+        try:
+            parts = decoded["candidates"][0]["content"]["parts"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise PlannerOutputError("Planner provider response shape was not recognized.") from exc
+        content = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+        if not content:
+            raise PlannerOutputError("Planner provider returned empty JSON content.")
         return content
 
 
@@ -223,6 +323,16 @@ def workflow_planner_from_settings(settings: Settings | None = None) -> Workflow
         return LLMWorkflowPlanner(
             OpenAIWorkflowPlanClient(settings),
             model_name=settings.openai_model,
+        )
+    if provider == "openrouter" and settings.openrouter_api_key:
+        return LLMWorkflowPlanner(
+            OpenRouterWorkflowPlanClient(settings),
+            model_name=settings.openrouter_model,
+        )
+    if provider == "gemini" and settings.gemini_api_key:
+        return LLMWorkflowPlanner(
+            GeminiWorkflowPlanClient(settings),
+            model_name=settings.gemini_model,
         )
     return DeterministicWorkflowPlanner()
 

@@ -26,9 +26,16 @@ GITHUB_OWNER=ImmanuelP31
 GITHUB_REPO=MCP_AI
 GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target
 
-OPENAI_API_KEY=replace-with-valid-openai-key
-LLM_PLANNER_PROVIDER=openai
-EMBEDDING_PROVIDER=openai
+GEMINI_API_KEY=replace-with-valid-gemini-key
+GEMINI_MODEL=gemini-2.5-flash
+LLM_PLANNER_PROVIDER=gemini
+LLM_PROVIDER=gemini
+EMBEDDING_PROVIDER=gemini
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+
+# Alternative live planner provider.
+OPENROUTER_API_KEY=replace-with-valid-openrouter-key
+OPENROUTER_MODEL=openrouter/auto
 ```
 
 Recommended GitHub token permissions:
@@ -105,17 +112,28 @@ What to show:
 
 ## Live LLM / Embedding Benchmark
 
-With a valid OpenAI key:
+With a valid Gemini key for live workflow planning:
 
 ```powershell
-$env:LLM_PLANNER_PROVIDER="openai"
-$env:EMBEDDING_PROVIDER="openai"
+$env:LLM_PLANNER_PROVIDER="gemini"
+$env:GEMINI_MODEL="gemini-2.5-flash"
+python -m evaluation.run --config semantic_rag_graph --mode real --limit 10
+```
+
+OpenRouter remains available by setting `LLM_PLANNER_PROVIDER=openrouter`.
+
+For live embedding retrieval, use Gemini embeddings:
+
+```powershell
+$env:EMBEDDING_PROVIDER="gemini"
+$env:GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 10
 ```
 
 Use a small limit first. Then increase to 30-50 for a presentable live benchmark.
 
-If OpenAI returns HTTP 401, the key is invalid/expired. Do not report that run as model quality.
+Provider HTTP 401, 429, or quota errors are infrastructure/authentication failures. Do not report
+those runs as model quality.
 
 ## Interview Script
 
@@ -147,7 +165,7 @@ Then show:
 - OpenSearch RAG: live validated with `index_backend: opensearch` using
   `OPENSEARCH_URL=http://localhost:9200`.
 - Controlled failing workflow: pushed to `main` and dispatched successfully.
-- OpenAI live planner/embedding smoke: project config now reads the `.env` key instead of the stale
-  machine-level key, but OpenAI returned HTTP 429 `credit_balance_exhausted`. Add API credits
-  before presenting live LLM or embedding metrics.
+- Live planner and embedding support: Gemini is the recommended provider for the current demo path.
+  OpenRouter remains available as an alternate planner provider; deterministic hashing remains the
+  CI fallback for embeddings.
 - Evaluation: mock baseline is generated and clearly labeled.

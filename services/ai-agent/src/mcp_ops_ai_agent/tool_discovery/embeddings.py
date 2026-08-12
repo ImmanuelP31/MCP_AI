@@ -23,7 +23,7 @@ class EmbeddingProviderUnavailable(RuntimeError):
 class HashingEmbeddingProvider:
     """Deterministic local embedding provider.
 
-    This is intentionally provider-neutral: production can replace it with OpenAI, an internal
+    This is intentionally provider-neutral: production can replace it with Gemini, an internal
     model, or an OpenSearch neural sparse/vector implementation without changing retrieval
     contracts.
     """
@@ -115,6 +115,80 @@ class OpenAIEmbeddingProvider:
         return decoded
 
 
+class GeminiEmbeddingProvider:
+    """Gemini-backed embeddings for live semantic retrieval."""
+
+    _host = "generativelanguage.googleapis.com"
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = "gemini-embedding-001",
+        timeout_seconds: int = 20,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+
+    def embed(self, text: str) -> tuple[float, ...]:
+        if not self.api_key:
+            raise EmbeddingProviderUnavailable("Gemini API key is not configured.")
+        payload: dict[str, object] = {
+            "model": f"models/{self.model}",
+            "content": {"parts": [{"text": text[:8000]}]},
+            "taskType": "RETRIEVAL_DOCUMENT",
+        }
+        response = self._post_json(f"/v1beta/models/{self.model}:embedContent", payload)
+        try:
+            embedding = response["embedding"]["values"]
+        except (KeyError, TypeError) as exc:
+            raise EmbeddingProviderUnavailable(
+                "Embedding response shape was not recognized."
+            ) from exc
+        if not isinstance(embedding, list) or not all(
+            isinstance(value, int | float) and not isinstance(value, bool)
+            for value in embedding
+        ):
+            raise EmbeddingProviderUnavailable("Embedding response did not contain numeric values.")
+        return _normalize([float(value) for value in embedding])
+
+    def _post_json(self, path: str, payload: dict[str, object]) -> dict[str, Any]:
+        body = json.dumps(payload).encode("utf-8")
+        context = ssl.create_default_context()
+        connection = http.client.HTTPSConnection(
+            self._host,
+            timeout=self.timeout_seconds,
+            context=context,
+        )
+        try:
+            connection.request(
+                "POST",
+                path,
+                body=body,
+                headers={
+                    "x-goog-api-key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            raw = response.read(2_000_000)
+        except OSError as exc:
+            raise EmbeddingProviderUnavailable(
+                f"Embedding provider request failed: {exc.__class__.__name__}."
+            ) from exc
+        finally:
+            connection.close()
+        if response.status >= 400:
+            raise EmbeddingProviderUnavailable(
+                f"Embedding provider returned HTTP {response.status}."
+            )
+        decoded = json.loads(raw.decode("utf-8") or "{}")
+        if not isinstance(decoded, dict):
+            raise EmbeddingProviderUnavailable("Embedding provider response must be an object.")
+        return decoded
+
+
 class FallbackEmbeddingProvider:
     """Use a live provider when available and deterministic hashing when it is not."""
 
@@ -139,6 +213,15 @@ def embedding_provider_from_settings(settings: Settings | None = None) -> Embedd
             OpenAIEmbeddingProvider(
                 api_key=settings.openai_api_key,
                 model=settings.openai_embedding_model,
+                timeout_seconds=settings.embedding_timeout_seconds,
+            ),
+            hashing,
+        )
+    if settings.embedding_provider.lower() == "gemini":
+        return FallbackEmbeddingProvider(
+            GeminiEmbeddingProvider(
+                api_key=settings.gemini_api_key,
+                model=settings.gemini_embedding_model,
                 timeout_seconds=settings.embedding_timeout_seconds,
             ),
             hashing,

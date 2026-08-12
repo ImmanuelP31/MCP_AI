@@ -21,13 +21,17 @@ class Settings(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         del settings_cls
 
-        def dotenv_openai_key() -> dict[str, Any]:
+        def dotenv_project_secrets() -> dict[str, Any]:
             data = dotenv_settings()
-            return {"openai_api_key": data["openai_api_key"]} if "openai_api_key" in data else {}
+            return {
+                key: data[key]
+                for key in ("openai_api_key", "openrouter_api_key", "gemini_api_key")
+                if key in data
+            }
 
         return (
             init_settings,
-            cast(PydanticBaseSettingsSource, dotenv_openai_key),
+            cast(PydanticBaseSettingsSource, dotenv_project_secrets),
             env_settings,
             dotenv_settings,
             file_secret_settings,
@@ -56,11 +60,18 @@ class Settings(BaseSettings):
     llm_provider: str = "deterministic"
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-4.1-mini"
+    openrouter_api_key: str = Field(default="", repr=False)
+    openrouter_model: str = "openrouter/auto"
+    openrouter_app_url: str = "https://github.com/ImmanuelP31/MCP_AI"
+    openrouter_app_name: str = "MCP Engineering Operations Platform"
+    gemini_api_key: str = Field(default="", repr=False)
+    gemini_model: str = "gemini-2.5-flash"
     llm_timeout_seconds: int = 20
     llm_planner_provider: str = "deterministic"
 
     embedding_provider: str = "hashing"
     openai_embedding_model: str = "text-embedding-3-small"
+    gemini_embedding_model: str = "gemini-embedding-001"
     embedding_timeout_seconds: int = 20
 
     opensearch_tool_index: str = "mcp-tools"

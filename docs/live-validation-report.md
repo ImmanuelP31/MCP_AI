@@ -13,10 +13,10 @@ Generated during the final presentation-readiness pass.
 | GitHub vertical-slice demo | Live validated | Failed build investigation, issue creation, approval-gated rerun request, approval, and rerun execution succeeded against the demo target. |
 | Repository-document RAG | Live validated | 34 bounded repository docs/workflows ingested. |
 | OpenSearch RAG backend | Live validated | Query returned `index_backend: opensearch` with the controlled failing workflow as top result. |
-| OpenAI planner | Blocked | Project config now reads the `.env` key instead of the stale machine environment key; provider returns HTTP 429 `credit_balance_exhausted`. |
-| OpenAI embeddings | Blocked | Embedding endpoint returns HTTP 429 `credit_balance_exhausted`, indicating no available API credits. |
-| 30-50 live LLM benchmark | Blocked | Cannot run honestly until OpenAI quota/rate limits are resolved. |
-| Hashing vs real embedding comparison | Partially blocked | Hashing baseline is available; real OpenAI embedding run is blocked by HTTP 429. |
+| Gemini planner | Implemented | `LLM_PLANNER_PROVIDER=gemini` uses the same typed workflow schema and backend validation path. |
+| Gemini embeddings | Implemented | `EMBEDDING_PROVIDER=gemini` uses Gemini embeddings for tool discovery and engineering RAG. |
+| 30-50 live LLM benchmark | Pending rerun | Requires explicit approval to send benchmark/tool context to the configured external provider. |
+| Hashing vs real embedding comparison | Ready to rerun | Hashing baseline is available; Gemini embedding mode is now the live provider path. |
 
 ## OpenSearch RAG Evidence
 
@@ -65,7 +65,7 @@ Measured output summary:
 - Human approval decision: `ALLOWED`
 - Rerun execution decision: `ALLOWED`
 
-## OpenAI Failure Analysis
+## Historical OpenAI Failure Analysis
 
 The first 401 failure was caused by a stale machine-level `OPENAI_API_KEY` overriding the project
 `.env` key. Project settings now load `.env` before inherited environment variables, and the
@@ -80,13 +80,14 @@ The provider message was: no credits remaining. This is a billing/quota conditio
 invalid-key authentication failure. The benchmark runner correctly records provider failures
 instead of fabricating successful model metrics.
 
-## Required Rerun After OpenAI Quota Is Available
+## Required Rerun With Gemini
 
-After adding billing/credits or using a key with available quota:
+After setting a valid Gemini key and approving external provider use:
 
 ```powershell
-$env:LLM_PLANNER_PROVIDER="openai"
-$env:EMBEDDING_PROVIDER="openai"
+$env:LLM_PLANNER_PROVIDER="gemini"
+$env:EMBEDDING_PROVIDER="gemini"
+$env:GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 30
 ```
 
@@ -96,7 +97,8 @@ For the retrieval comparison:
 $env:EMBEDDING_PROVIDER="hashing"
 python -m evaluation.run --config semantic_rag_graph --mode mock --limit 50
 
-$env:EMBEDDING_PROVIDER="openai"
+$env:EMBEDDING_PROVIDER="gemini"
+$env:GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 50
 ```
 

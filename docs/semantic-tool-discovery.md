@@ -54,7 +54,7 @@ their MCP servers exist. The gateway rejects non-executable catalog entries.
 The retrieval service combines:
 
 - deterministic vector similarity from `HashingEmbeddingProvider`
-- optional provider-backed embeddings from `OpenAIEmbeddingProvider`
+- provider-backed embeddings from `GeminiEmbeddingProvider`
 - lexical/BM25-style scoring
 - metadata boosts for tags, category, and tool name
 - server/category filters
@@ -75,7 +75,8 @@ TOOL_DISCOVERY_INDEX_BACKEND=memory
 Live demo switches:
 
 ```env
-EMBEDDING_PROVIDER=openai
+EMBEDDING_PROVIDER=gemini
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 TOOL_DISCOVERY_INDEX_BACKEND=opensearch
 ```
 
