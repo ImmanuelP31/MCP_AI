@@ -24,7 +24,7 @@ Keep secrets in `.env`; never commit them.
 GITHUB_TOKEN=replace-with-fine-grained-github-token
 GITHUB_OWNER=ImmanuelP31
 GITHUB_REPO=MCP_AI
-GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI
+GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target
 
 OPENAI_API_KEY=replace-with-valid-openai-key
 LLM_PLANNER_PROVIDER=openai
@@ -61,10 +61,14 @@ The workflow file is:
 .github/workflows/demo-failing-build.yml
 ```
 
-After pushing this branch to GitHub, trigger it:
+For the clean external target repository, trigger it:
 
 ```powershell
-python scripts/demo/run_live_github_control_plane_demo.py --trigger-failure --wait-seconds 90
+$env:GITHUB_ALLOWED_REPOSITORIES="ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target"
+python scripts/demo/run_live_github_control_plane_demo.py `
+  --repository ImmanuelP31/mcp-ai-demo-target `
+  --trigger-failure `
+  --wait-seconds 90
 ```
 
 If the workflow is not on GitHub yet, GitHub will return a workflow-not-found error. Push the
@@ -82,6 +86,7 @@ Full governed workflow:
 
 ```powershell
 python scripts/demo/run_live_github_control_plane_demo.py `
+  --repository ImmanuelP31/mcp-ai-demo-target `
   --create-issue `
   --request-rerun `
   --approve-rerun
@@ -129,19 +134,20 @@ Then show:
 
 ## Current Verified Status
 
-- Backend tests: 381 passed.
+- Backend tests: 382 passed.
 - Frontend tests/lint/typecheck/build: 9 tests passed, lint/typecheck/build passed.
 - Python lint/type/security: ruff passed, mypy passed on 154 source files, Bandit found no issues.
 - Docker Compose config: parsed successfully; local Docker config access emitted a sandbox warning.
-- GitHub vertical-slice demo: live validated against `ImmanuelP31/MCP_AI`; issue
-  `https://github.com/ImmanuelP31/MCP_AI/issues/1` was created and an approval-gated workflow
-  rerun executed.
+- GitHub vertical-slice demo: live validated against dedicated target
+  `ImmanuelP31/mcp-ai-demo-target`; issue
+  `https://github.com/ImmanuelP31/mcp-ai-demo-target/issues/1` was created and an approval-gated
+  workflow rerun executed.
 - Repository-document RAG: 34 bounded repo docs/workflows ingested; controlled failing workflow was
   the top retrieved result for the demo query.
 - OpenSearch RAG: live validated with `index_backend: opensearch` using
   `OPENSEARCH_URL=http://localhost:9200`.
 - Controlled failing workflow: pushed to `main` and dispatched successfully.
 - OpenAI live planner/embedding smoke: project config now reads the `.env` key instead of the stale
-  machine-level key, but OpenAI returned HTTP 429. Add quota or use a key with available quota
+  machine-level key, but OpenAI returned HTTP 429 `credit_balance_exhausted`. Add API credits
   before presenting live LLM or embedding metrics.
 - Evaluation: mock baseline is generated and clearly labeled.

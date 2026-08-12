@@ -7,13 +7,14 @@ Generated during the final presentation-readiness pass.
 | Area | Status | Evidence |
 | --- | --- | --- |
 | GitHub token | Configured | `.env` contains a GitHub token; token value was not printed. |
-| GitHub read smoke | Live validated | `get_latest_failed_build` reached `ImmanuelP31/MCP_AI` and returned the controlled failed run. |
-| Controlled failing workflow | Live validated | `.github/workflows/demo-failing-build.yml` dispatched on `main`. |
-| GitHub vertical-slice demo | Live validated | Failed build investigation, issue creation, approval-gated rerun request, approval, and rerun execution succeeded. |
+| GitHub demo target repo | Live validated | `https://github.com/ImmanuelP31/mcp-ai-demo-target` was created for clean demos. |
+| GitHub read smoke | Live validated | `get_latest_failed_build` reached the demo target and returned the controlled failed run. |
+| Controlled failing workflow | Live validated | `.github/workflows/demo-failing-build.yml` dispatched on the demo target `main` branch. |
+| GitHub vertical-slice demo | Live validated | Failed build investigation, issue creation, approval-gated rerun request, approval, and rerun execution succeeded against the demo target. |
 | Repository-document RAG | Live validated | 34 bounded repository docs/workflows ingested. |
 | OpenSearch RAG backend | Live validated | Query returned `index_backend: opensearch` with the controlled failing workflow as top result. |
-| OpenAI planner | Blocked | Project config now reads the `.env` key instead of the stale machine environment key; provider calls now return HTTP 429. |
-| OpenAI embeddings | Blocked | Embedding endpoint now returns HTTP 429, indicating quota/rate limiting rather than invalid authentication. |
+| OpenAI planner | Blocked | Project config now reads the `.env` key instead of the stale machine environment key; provider returns HTTP 429 `credit_balance_exhausted`. |
+| OpenAI embeddings | Blocked | Embedding endpoint returns HTTP 429 `credit_balance_exhausted`, indicating no available API credits. |
 | 30-50 live LLM benchmark | Blocked | Cannot run honestly until OpenAI quota/rate limits are resolved. |
 | Hashing vs real embedding comparison | Partially blocked | Hashing baseline is available; real OpenAI embedding run is blocked by HTTP 429. |
 
@@ -41,19 +42,25 @@ Measured output summary:
 Live governed demo command:
 
 ```powershell
-python scripts/demo/run_live_github_control_plane_demo.py --create-issue --request-rerun --approve-rerun
+$env:GITHUB_ALLOWED_REPOSITORIES="ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target"
+python scripts/demo/run_live_github_control_plane_demo.py `
+  --repository ImmanuelP31/mcp-ai-demo-target `
+  --create-issue `
+  --request-rerun `
+  --approve-rerun
 ```
 
 Measured output summary:
 
-- Repository: `ImmanuelP31/MCP_AI`
-- Failed workflow run: `31503657179`
+- Repository: `ImmanuelP31/mcp-ai-demo-target`
+- Failed workflow run: `31581559101`
 - Workflow name: `Demo Failing Build`
-- Failed commit: `93c4e31b8514bd26e21fda7e64eceb9e8a3a55fd`
+- Failed commit: `cc1a5287ef16f0a01c7129a53ba219224f0c1de4`
 - Tool decisions before high-risk action: `ALLOWED`
 - Failure analysis source: `source_code_failure`
 - Failure analysis confidence: `0.78`
-- GitHub issue created: `https://github.com/ImmanuelP31/MCP_AI/issues/1`
+- Code files changed: `1`
+- GitHub issue created: `https://github.com/ImmanuelP31/mcp-ai-demo-target/issues/1`
 - High-risk rerun request decision: `PENDING_APPROVAL`
 - Human approval decision: `ALLOWED`
 - Rerun execution decision: `ALLOWED`
@@ -64,12 +71,14 @@ The first 401 failure was caused by a stale machine-level `OPENAI_API_KEY` overr
 `.env` key. Project settings now load `.env` before inherited environment variables, and the
 effective settings key matches the `.env` key.
 
-After that fix, the OpenAI embedding endpoint returned HTTP 429:
+After that fix, the OpenAI planner and embedding endpoints returned HTTP 429:
 
-- Embeddings endpoint: HTTP 429
+- Planner endpoint: HTTP 429, `credit_balance_exhausted`
+- Embeddings endpoint: HTTP 429, `credit_balance_exhausted`
 
-This is a quota/rate-limit condition, not an invalid-key authentication failure. The benchmark
-runner correctly records provider failures instead of fabricating successful model metrics.
+The provider message was: no credits remaining. This is a billing/quota condition, not an
+invalid-key authentication failure. The benchmark runner correctly records provider failures
+instead of fabricating successful model metrics.
 
 ## Required Rerun After OpenAI Quota Is Available
 

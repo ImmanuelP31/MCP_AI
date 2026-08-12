@@ -4,10 +4,16 @@
 
 The platform can investigate a real GitHub repository through governed MCP tools. The LLM/planner does not call GitHub directly. GitHub access is routed through the MCP gateway, RBAC, policy, approval, idempotency, and audit.
 
-Configured target for this repository:
+Configured platform repository:
 
 ```text
 ImmanuelP31/MCP_AI
+```
+
+Dedicated external demo target:
+
+```text
+ImmanuelP31/mcp-ai-demo-target
 ```
 
 ## Environment
@@ -19,7 +25,7 @@ GITHUB_TOKEN=replace-with-fine-grained-github-token
 GITHUB_OWNER=ImmanuelP31
 GITHUB_REPO=MCP_AI
 GITHUB_DEFAULT_BRANCH=main
-GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI
+GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target
 GITHUB_API_BASE_URL=https://api.github.com
 ```
 
@@ -118,22 +124,38 @@ Expected flow:
 
 ## Controlled Failed Build
 
-For a reproducible interview/demo failure, this repository includes:
+For a clean interview/demo failure, use the dedicated target repository:
+
+```text
+https://github.com/ImmanuelP31/mcp-ai-demo-target
+```
+
+It contains:
 
 ```text
 .github/workflows/demo-failing-build.yml
+docs/deployment.md
+src/payments/validation.py
 ```
 
-It is manual-only. After the branch containing that workflow is pushed to GitHub, run:
+The workflow is manual-only. Trigger a fresh failure:
 
 ```powershell
-python scripts/demo/run_live_github_control_plane_demo.py --trigger-failure --wait-seconds 90
+$env:GITHUB_ALLOWED_REPOSITORIES="ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target"
+python scripts/demo/run_live_github_control_plane_demo.py `
+  --repository ImmanuelP31/mcp-ai-demo-target `
+  --trigger-failure `
+  --wait-seconds 90
 ```
 
 Then run the governed investigation:
 
 ```powershell
-python scripts/demo/run_live_github_control_plane_demo.py --create-issue --request-rerun --approve-rerun
+python scripts/demo/run_live_github_control_plane_demo.py `
+  --repository ImmanuelP31/mcp-ai-demo-target `
+  --create-issue `
+  --request-rerun `
+  --approve-rerun
 ```
 
 The script calls GitHub through governed MCP gateway tools and prints a compact JSON trace for
@@ -158,5 +180,6 @@ $env:EMBEDDING_PROVIDER="openai"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 
-If OpenAI returns HTTP 401, rotate or replace `OPENAI_API_KEY`. If GitHub has no failed workflow
-run, the live GitHub smoke will correctly report no latest failed build.
+If OpenAI returns HTTP 401, rotate or replace `OPENAI_API_KEY`. If OpenAI returns HTTP 429 with
+`credit_balance_exhausted`, add API credits before running live LLM/embedding benchmarks. If GitHub
+has no failed workflow run, the live GitHub smoke will correctly report no latest failed build.

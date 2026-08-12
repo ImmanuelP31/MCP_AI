@@ -99,7 +99,7 @@ Live GitHub/LLM demo settings:
 GITHUB_TOKEN=replace-with-fine-grained-github-token
 GITHUB_OWNER=ImmanuelP31
 GITHUB_REPO=MCP_AI
-GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI
+GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target
 
 OPENAI_API_KEY=your-valid-openai-key
 LLM_PLANNER_PROVIDER=openai
@@ -191,9 +191,9 @@ See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 ## Limitations
 
 - Current benchmark results are deterministic mock results unless a live model provider is configured.
-- Live LLM and OpenAI embedding benchmarks require a valid OpenAI key with available quota; the project now reads the `.env` key correctly, but the provider returned HTTP 429 during the final smoke attempt, so only deterministic benchmark results are recorded.
+- Live LLM and OpenAI embedding benchmarks require a valid OpenAI key with available quota; the project now reads the `.env` key correctly, but the provider returned HTTP 429 `credit_balance_exhausted` during the final smoke attempt, so only deterministic benchmark results are recorded.
 - OpenSearch-backed repository-document RAG was live validated locally with `OPENSEARCH_URL=http://localhost:9200`; Docker-internal service names such as `http://opensearch:9200` are for containers, not host-run scripts.
-- Live GitHub failed-build investigation was validated against `ImmanuelP31/MCP_AI` with the controlled failing workflow, issue creation, approval-gated rerun request, approval, and rerun execution.
+- Live GitHub failed-build investigation was validated against the dedicated demo target `ImmanuelP31/mcp-ai-demo-target` with the controlled failing workflow, issue creation, approval-gated rerun request, approval, and rerun execution.
 - The local simulator and synthetic engineering corpus are demo/pilot assets.
 - Enterprise identity federation is represented by signed JWT validation; production OIDC/JWKS integration should be wired to the same authenticator boundary.
 - Docker Compose is for local validation, not a production deployment topology.
