@@ -16,7 +16,7 @@ from mcp_ops_ai_agent.tool_discovery.models import (
 from mcp_ops_ai_agent.tool_discovery.retrieval import explanation
 from mcp_ops_ai_agent.tool_discovery.service import ToolDiscoveryService
 from mcp_ops_ai_agent.workflows.models import WorkflowPlanRequest
-from mcp_ops_ai_agent.workflows.planner import workflow_planner_from_settings
+from mcp_ops_ai_agent.workflows.planner import PlannerOutputError, workflow_planner_from_settings
 from mcp_ops_ai_agent.workflows.service import WorkflowPlanningService
 from mcp_ops_ai_agent.workflows.validator import WorkflowValidationError
 from mcp_ops_common.config import get_settings
@@ -60,6 +60,11 @@ class EvaluationCaseResult:
     embedding_provider: str
     embedding_fallback_allowed: bool
     retrieval_backend: str
+    error_stage: str | None = None
+    error_type: str | None = None
+    error_reason: str | None = None
+    retry_attempted: bool = False
+    retry_failure_reason: str | None = None
     error: str | None = None
 
 
@@ -308,6 +313,11 @@ def _evaluate_case(
     retrieved_documents: list[str] = []
     workflow_valid = False
     error: str | None = None
+    error_stage: str | None = None
+    error_type: str | None = None
+    error_reason: str | None = None
+    retry_attempted = False
+    retry_failure_reason: str | None = None
     planner_started = time.perf_counter()
     try:
         result = runtime.service.plan(
@@ -336,8 +346,23 @@ def _evaluate_case(
         ]
     except WorkflowValidationError as exc:
         error = "; ".join(issue.code for issue in exc.issues)
+        error_stage = "workflow_validation"
+        error_type = exc.__class__.__name__
+        error_reason = "; ".join(
+            f"{issue.code}: {issue.message}" for issue in exc.issues[:3]
+        )
+    except PlannerOutputError as exc:
+        error = exc.__class__.__name__
+        error_stage = exc.stage
+        error_type = exc.__class__.__name__
+        error_reason = exc.reason
+        retry_attempted = exc.retry_attempted
+        retry_failure_reason = exc.retry_failure_reason
     except Exception as exc:  # noqa: BLE001 - evaluation records failures as data
         error = exc.__class__.__name__
+        error_stage = "runtime"
+        error_type = exc.__class__.__name__
+        error_reason = str(exc)[:500] or exc.__class__.__name__
     planner_latency_ms = (time.perf_counter() - planner_started) * 1000
     e2e_latency_ms = (time.perf_counter() - started) * 1000
     prohibited_attempted = bool(set(actual_tools) & set(item.prohibited_tools))
@@ -369,6 +394,11 @@ def _evaluate_case(
         embedding_provider=embedding_provider_name,
         embedding_fallback_allowed=fallback_allowed,
         retrieval_backend=retrieval_backend,
+        error_stage=error_stage,
+        error_type=error_type,
+        error_reason=error_reason,
+        retry_attempted=retry_attempted,
+        retry_failure_reason=retry_failure_reason,
         error=error,
     )
     metric_input = MetricInputs(
@@ -399,6 +429,7 @@ def _failed_case_result(
     error: Exception,
 ) -> tuple[EvaluationCaseResult, MetricInputs]:
     error_name = error.__class__.__name__
+    error_reason = str(error)[:500] or error_name
     case_result = EvaluationCaseResult(
         id=item.id,
         category=item.category,
@@ -423,6 +454,11 @@ def _failed_case_result(
         embedding_provider=get_settings().embedding_provider.lower(),
         embedding_fallback_allowed=mode != "real",
         retrieval_backend="unavailable",
+        error_stage="runtime_setup",
+        error_type=error_name,
+        error_reason=error_reason,
+        retry_attempted=False,
+        retry_failure_reason=None,
         error=error_name,
     )
     metric_input = MetricInputs(

@@ -51,6 +51,17 @@ class PolicyDecision(StrEnum):
     REQUIRE_ADDITIONAL_CONTEXT = "REQUIRE_ADDITIONAL_CONTEXT"
 
 
+class ConditionOperator(StrEnum):
+    EQ = "eq"
+    NE = "ne"
+    GT = "gt"
+    GTE = "gte"
+    LT = "lt"
+    LTE = "lte"
+    CONTAINS = "contains"
+    EXISTS = "exists"
+
+
 class WorkflowPolicyEvaluation(StrictModel):
     actor: str = Field(min_length=1, max_length=160)
     role: str = Field(min_length=1, max_length=64)
@@ -85,6 +96,20 @@ class ArgumentReference(StrictModel):
     output_path: str = Field(min_length=1, max_length=240)
 
 
+class WorkflowCondition(StrictModel):
+    source_node_id: str = Field(min_length=1, max_length=120)
+    output_path: str = Field(min_length=1, max_length=240)
+    operator: ConditionOperator = ConditionOperator.EQ
+    value: Any = None
+
+    @field_validator("operator", mode="before")
+    @classmethod
+    def coerce_operator(cls, value: object) -> object:
+        if isinstance(value, str):
+            return ConditionOperator(value)
+        return value
+
+
 class WorkflowNode(StrictModel):
     id: str = Field(min_length=1, max_length=120)
     workflow_id: UUID | None = None
@@ -95,6 +120,7 @@ class WorkflowNode(StrictModel):
     argument_references: list[ArgumentReference] = Field(default_factory=list, max_length=20)
     depends_on: list[str] = Field(default_factory=list, max_length=20)
     condition: str | None = Field(default=None, max_length=300)
+    typed_condition: WorkflowCondition | None = None
     risk_level: str = Field(min_length=1, max_length=32)
     approval_required: bool = False
     execution_status: WorkflowNodeStatus = WorkflowNodeStatus.PENDING

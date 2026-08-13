@@ -9,7 +9,12 @@ from pydantic import ValidationError
 
 from mcp_ops_ai_agent.engineering_rag.models import KnowledgeSearchResult
 from mcp_ops_ai_agent.tool_discovery.models import ToolDocument
-from mcp_ops_ai_agent.workflows.models import WorkflowEdge, WorkflowNode, WorkflowPlanDraft
+from mcp_ops_ai_agent.workflows.models import (
+    WorkflowCondition,
+    WorkflowEdge,
+    WorkflowNode,
+    WorkflowPlanDraft,
+)
 
 
 class WorkflowPlanner(Protocol):
@@ -28,7 +33,20 @@ class WorkflowPlanner(Protocol):
 
 
 class PlannerOutputError(ValueError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str = "planner_output",
+        reason: str | None = None,
+        retry_attempted: bool = False,
+        retry_failure_reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.reason = reason or message
+        self.retry_attempted = retry_attempted
+        self.retry_failure_reason = retry_failure_reason
 
 
 class PlannerConfigurationError(RuntimeError):
@@ -53,7 +71,9 @@ class OpenAIWorkflowPlanClient:
     def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
         if not self.api_key:
             raise PlannerOutputError(
-                f"{self._provider_name} API key is not configured for live planning."
+                f"{self._provider_name} API key is not configured for live planning.",
+                stage="provider_configuration",
+                reason="missing API key",
             )
         import http.client
         import ssl
@@ -90,19 +110,33 @@ class OpenAIWorkflowPlanClient:
             raw = response.read(3_000_000)
         except OSError as exc:
             raise PlannerOutputError(
-                f"Planner provider request failed: {exc.__class__.__name__}."
+                f"Planner provider request failed: {exc.__class__.__name__}.",
+                stage="provider_request",
+                reason=exc.__class__.__name__,
             ) from exc
         finally:
             connection.close()
         if response.status >= 400:
-            raise PlannerOutputError(f"Planner provider returned HTTP {response.status}.")
+            raise PlannerOutputError(
+                f"Planner provider returned HTTP {response.status}.",
+                stage="provider_http",
+                reason=f"HTTP {response.status}",
+            )
         decoded = json.loads(raw.decode("utf-8") or "{}")
         try:
             content = decoded["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise PlannerOutputError("Planner provider response shape was not recognized.") from exc
+            raise PlannerOutputError(
+                "Planner provider response shape was not recognized.",
+                stage="provider_response",
+                reason="unrecognized response shape",
+            ) from exc
         if not isinstance(content, str):
-            raise PlannerOutputError("Planner provider content must be a JSON string.")
+            raise PlannerOutputError(
+                "Planner provider content must be a JSON string.",
+                stage="provider_response",
+                reason="content was not a string",
+            )
         return content
 
     def _headers(self) -> dict[str, str]:
@@ -143,7 +177,11 @@ class GeminiWorkflowPlanClient:
 
     def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
         if not self.api_key:
-            raise PlannerOutputError("Gemini API key is not configured for live planning.")
+            raise PlannerOutputError(
+                "Gemini API key is not configured for live planning.",
+                stage="provider_configuration",
+                reason="missing API key",
+            )
         import http.client
         import ssl
         from urllib.parse import quote
@@ -188,12 +226,18 @@ class GeminiWorkflowPlanClient:
             raw = response.read(3_000_000)
         except OSError as exc:
             raise PlannerOutputError(
-                f"Planner provider request failed: {exc.__class__.__name__}."
+                f"Planner provider request failed: {exc.__class__.__name__}.",
+                stage="provider_request",
+                reason=exc.__class__.__name__,
             ) from exc
         finally:
             connection.close()
         if response.status >= 400:
-            raise PlannerOutputError(f"Planner provider returned HTTP {response.status}.")
+            raise PlannerOutputError(
+                f"Planner provider returned HTTP {response.status}.",
+                stage="provider_http",
+                reason=f"HTTP {response.status}",
+            )
         decoded = json.loads(raw.decode("utf-8") or "{}")
         finish_reason = (
             decoded.get("candidates", [{}])[0].get("finishReason")
@@ -201,14 +245,26 @@ class GeminiWorkflowPlanClient:
             else None
         )
         if finish_reason == "MAX_TOKENS":
-            raise PlannerOutputError("Planner provider truncated JSON at max output tokens.")
+            raise PlannerOutputError(
+                "Planner provider truncated JSON at max output tokens.",
+                stage="provider_response",
+                reason="truncated JSON at max output tokens",
+            )
         try:
             parts = decoded["candidates"][0]["content"]["parts"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise PlannerOutputError("Planner provider response shape was not recognized.") from exc
+            raise PlannerOutputError(
+                "Planner provider response shape was not recognized.",
+                stage="provider_response",
+                reason="unrecognized response shape",
+            ) from exc
         content = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
         if not content:
-            raise PlannerOutputError("Planner provider returned empty JSON content.")
+            raise PlannerOutputError(
+                "Planner provider returned empty JSON content.",
+                stage="provider_response",
+                reason="empty JSON content",
+            )
         return content
 
 
@@ -257,11 +313,23 @@ class LLMWorkflowPlanner:
                 ),
                 "previous_error": str(first_error),
             }
-            return self._parse(
-                self.client.complete_json(system_prompt=system_prompt, user_payload=retry_payload),
-                user_request,
-                tools,
-            )
+            try:
+                return self._parse(
+                    self.client.complete_json(
+                        system_prompt=system_prompt,
+                        user_payload=retry_payload,
+                    ),
+                    user_request,
+                    tools,
+                )
+            except PlannerOutputError as second_error:
+                raise PlannerOutputError(
+                    str(second_error),
+                    stage=second_error.stage,
+                    reason=second_error.reason,
+                    retry_attempted=True,
+                    retry_failure_reason=second_error.reason,
+                ) from second_error
 
     def _parse(
         self,
@@ -272,12 +340,26 @@ class LLMWorkflowPlanner:
         try:
             payload = json.loads(raw_json)
             if not isinstance(payload, dict):
-                raise PlannerOutputError("Planner JSON root must be an object.")
+                raise PlannerOutputError(
+                    "Planner JSON root must be an object.",
+                    stage="schema_validation",
+                    reason="JSON root was not an object",
+                )
             payload = _normalize_plan_payload(payload, self.planner_model, user_request, tools)
             payload.setdefault("planner_model", self.planner_model)
             return WorkflowPlanDraft.model_validate(payload)
-        except (json.JSONDecodeError, ValidationError) as exc:
-            raise PlannerOutputError("Planner returned malformed workflow JSON.") from exc
+        except json.JSONDecodeError as exc:
+            raise PlannerOutputError(
+                "Planner returned malformed JSON.",
+                stage="json_parse",
+                reason=exc.msg,
+            ) from exc
+        except ValidationError as exc:
+            raise PlannerOutputError(
+                "Planner output failed workflow schema validation.",
+                stage="schema_validation",
+                reason=_validation_reason(exc),
+            ) from exc
 
 
 class DeterministicWorkflowPlanner:
@@ -329,8 +411,18 @@ class JsonWorkflowPlanner:
         try:
             json.loads(self.raw_json)
             return WorkflowPlanDraft.model_validate_json(self.raw_json)
-        except (json.JSONDecodeError, ValidationError) as exc:
-            raise PlannerOutputError("Planner returned malformed workflow JSON.") from exc
+        except json.JSONDecodeError as exc:
+            raise PlannerOutputError(
+                "Planner returned malformed JSON.",
+                stage="json_parse",
+                reason=exc.msg,
+            ) from exc
+        except ValidationError as exc:
+            raise PlannerOutputError(
+                "Planner output failed workflow schema validation.",
+                stage="schema_validation",
+                reason=_validation_reason(exc),
+            ) from exc
 
 
 def workflow_planner_from_settings(
@@ -424,6 +516,12 @@ def _build_failure_workflow(
                 user_request,
                 depends_on=safe_depends_on,
                 condition="failure_analysis.source == 'source_code_failure'",
+                typed_condition={
+                    "source_node_id": "failure_analysis",
+                    "output_path": "data.source",
+                    "operator": "eq",
+                    "value": "source_code_failure",
+                },
                 knowledge_references=_references_from_knowledge(knowledge, requested_record_tool),
             )
         )
@@ -582,6 +680,7 @@ def _node(
     *,
     depends_on: list[str] | None = None,
     condition: str | None = None,
+    typed_condition: dict[str, object] | None = None,
     knowledge_references: list[str] | None = None,
 ) -> WorkflowNode:
     return WorkflowNode(
@@ -592,6 +691,9 @@ def _node(
         arguments=_arguments_for(tool, user_request),
         depends_on=depends_on or [],
         condition=condition,
+        typed_condition=WorkflowCondition.model_validate(typed_condition)
+        if typed_condition
+        else None,
         risk_level=tool.risk_level,
         approval_required=tool.risk_level in {"HIGH", "CRITICAL"},
         knowledge_references=knowledge_references or [],
@@ -681,6 +783,12 @@ def _arguments_for(tool: ToolDocument, user_request: str) -> dict[str, object]:
 _REFERENCE_PATTERN = re.compile(
     r"^(?P<source>[A-Za-z0-9_-]{1,120})\.(?P<path>[A-Za-z0-9_.\[\]-]{1,240})$"
 )
+_CONDITION_PATTERN = re.compile(
+    r"^(?P<source>[A-Za-z0-9_-]{1,120})\."
+    r"(?P<path>[A-Za-z0-9_.\[\]-]{1,240})\s*"
+    r"(?P<operator>==|!=|>=|<=|>|<)\s*"
+    r"[\"']?(?P<value>[^\"']{1,240})[\"']?$"
+)
 _REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SHA_PATTERN = re.compile(r"^[A-Fa-f0-9]{7,40}$")
 _SAFE_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,239}$")
@@ -746,8 +854,84 @@ def _argument_reference(
     return {
         "argument": argument[:120],
         "source_node_id": source_node_id[:120],
-        "output_path": match.group("path")[:240],
+        "output_path": _canonical_output_path(match.group("path"))[:240],
     }
+
+
+def _canonical_output_path(path: str) -> str:
+    normalized = path.strip()
+    for prefix in ("output.", "result.", "tool_result.data."):
+        if normalized.startswith(prefix):
+            return "data." + normalized[len(prefix) :]
+    if normalized.startswith("tool_result."):
+        return "data." + normalized[len("tool_result.") :]
+    if not normalized.startswith("data."):
+        return "data." + normalized
+    return normalized
+
+
+def _normalize_typed_condition(
+    value: Any,
+    *,
+    depends_on: list[str],
+) -> dict[str, object] | None:
+    if isinstance(value, dict):
+        source_node_id = value.get("source_node_id") or value.get("source") or value.get("$from")
+        output_path = value.get("output_path") or value.get("path")
+        operator = str(value.get("operator") or "eq").lower()
+        if not isinstance(source_node_id, str) or source_node_id not in set(depends_on):
+            return None
+        if not isinstance(output_path, str) or not _safe_output_path(output_path):
+            return None
+        if operator not in {"eq", "ne", "gt", "gte", "lt", "lte", "contains", "exists"}:
+            return None
+        return {
+            "source_node_id": source_node_id[:120],
+            "output_path": _canonical_output_path(output_path)[:240],
+            "operator": operator,
+            "value": value.get("value"),
+        }
+    if isinstance(value, str):
+        match = _CONDITION_PATTERN.match(value.strip())
+        if match is None:
+            return None
+        source_node_id = match.group("source")
+        if source_node_id not in set(depends_on):
+            return None
+        return {
+            "source_node_id": source_node_id[:120],
+            "output_path": _canonical_output_path(match.group("path"))[:240],
+            "operator": {
+                "==": "eq",
+                "!=": "ne",
+                ">": "gt",
+                ">=": "gte",
+                "<": "lt",
+                "<=": "lte",
+            }[match.group("operator")],
+            "value": _coerce_condition_value(match.group("value").strip()),
+        }
+    return None
+
+
+def _safe_output_path(path: str) -> bool:
+    return re.match(r"^[A-Za-z0-9_.\[\]-]{1,240}$", path) is not None
+
+
+def _coerce_condition_value(value: str) -> str | int | float | bool:
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
 
 
 def _sanitize_argument_value(
@@ -1048,11 +1232,16 @@ def _normalize_node(
         arguments = {}
     trusted_tool = available.get(tool_name)
     if trusted_tool is not None:
+        safe_depends_on = [str(item)[:120] for item in depends_on]
         trusted_arguments, argument_references = _trusted_arguments_for(
             trusted_tool,
             user_request,
             arguments,
-            depends_on=[str(item)[:120] for item in depends_on],
+            depends_on=safe_depends_on,
+        )
+        typed_condition = _normalize_typed_condition(
+            node.get("typed_condition", node.get("condition")),
+            depends_on=safe_depends_on,
         )
         return {
             "id": node_id[:120],
@@ -1061,8 +1250,11 @@ def _normalize_node(
             "description": trusted_tool.description,
             "arguments": trusted_arguments,
             "argument_references": argument_references,
-            "depends_on": [str(item)[:120] for item in depends_on],
-            "condition": _optional_string(node.get("condition"), 300),
+            "depends_on": safe_depends_on,
+            "condition": _optional_string(node.get("condition"), 300)
+            if isinstance(node.get("condition"), str)
+            else None,
+            "typed_condition": typed_condition,
             "risk_level": trusted_tool.risk_level,
             "approval_required": trusted_tool.risk_level in {"HIGH", "CRITICAL"},
             "knowledge_references": [
@@ -1082,6 +1274,10 @@ def _normalize_node(
         "argument_references": [],
         "depends_on": [str(item)[:120] for item in depends_on],
         "condition": _optional_string(node.get("condition"), 300),
+        "typed_condition": _normalize_typed_condition(
+            node.get("typed_condition", node.get("condition")),
+            depends_on=[str(item)[:120] for item in depends_on],
+        ),
         "risk_level": str(node.get("risk_level") or "LOW")[:32],
         "approval_required": bool(node.get("approval_required", False)),
         "knowledge_references": [
@@ -1098,6 +1294,16 @@ def _confidence(value: Any) -> float:
     if isinstance(value, int | float) and not isinstance(value, bool):
         return max(0.0, min(1.0, float(value)))
     return 0.5
+
+
+def _validation_reason(exc: ValidationError) -> str:
+    errors = exc.errors()
+    if not errors:
+        return "schema validation failed"
+    first = errors[0]
+    location = ".".join(str(item) for item in first.get("loc", ()))
+    message = str(first.get("msg", "schema validation failed"))
+    return f"{location}: {message}"[:500] if location else message[:500]
 
 
 def _optional_string(value: Any, max_length: int) -> str | None:

@@ -7,8 +7,11 @@ from uuid import uuid4
 from mcp_ops_ai_agent.gateway import GatewayClient
 from mcp_ops_ai_agent.workflows.events import InMemoryWorkflowEventPublisher
 from mcp_ops_ai_agent.workflows.models import (
+    ArgumentReference,
+    ConditionOperator,
     RetryStrategy,
     Workflow,
+    WorkflowCondition,
     WorkflowNode,
     WorkflowNodeStatus,
     WorkflowStatus,
@@ -186,6 +189,65 @@ def test_redis_unavailable_retry_and_backend_restart_recovery() -> None:
     assert recovered.nodes[0].attempts == 2
 
 
+def test_gateway_wrapped_outputs_bind_typed_runtime_references() -> None:
+    repository = InMemoryWorkflowRepository()
+    logs = _node("logs", tool_name="get_pipeline_logs", depends_on=["failed_jobs"]).model_copy(
+        update={
+            "arguments": {"repository": "ImmanuelP31/MCP_AI", "job_id": 0},
+            "argument_references": [
+                ArgumentReference(
+                    argument="job_id",
+                    source_node_id="failed_jobs",
+                    output_path="data.jobs.0.id",
+                )
+            ],
+        }
+    )
+    workflow = repository.save_workflow(
+        _workflow([_node("failed_jobs", tool_name="get_failed_jobs"), logs])
+    )
+    gateway = SequencedGateway(
+        [
+            _ok({"jobs": [{"id": 777}]}),
+            _ok({"log_excerpt": "bounded failure log"}),
+        ]
+    )
+    service = WorkflowPlanningService(repository=repository, gateway_client=gateway)
+
+    executed = service.execute(workflow.id, role="ENGINEER")
+
+    assert executed.status == WorkflowStatus.COMPLETED
+    assert gateway.requests[1].arguments["job_id"] == 777
+
+
+def test_typed_condition_reads_dependency_output_to_execute_or_skip_branch() -> None:
+    for source, expected_status in [
+        ("source_code_failure", WorkflowNodeStatus.SUCCEEDED),
+        ("pipeline_or_environment", WorkflowNodeStatus.SKIPPED),
+    ]:
+        repository = InMemoryWorkflowRepository()
+        issue = _node("issue", tool_name="create_issue", depends_on=["analysis"]).model_copy(
+            update={
+                "typed_condition": WorkflowCondition(
+                    source_node_id="analysis",
+                    output_path="data.source",
+                    operator=ConditionOperator.EQ,
+                    value="source_code_failure",
+                )
+            }
+        )
+        workflow = repository.save_workflow(
+            _workflow([_node("analysis", tool_name="analyze_build_failure"), issue])
+        )
+        gateway = SequencedGateway([_ok({"source": source}), _ok({"issue_number": 31})])
+        service = WorkflowPlanningService(repository=repository, gateway_client=gateway)
+
+        executed = service.execute(workflow.id, role="ENGINEER")
+
+        nodes = {node.id: node for node in executed.nodes}
+        assert nodes["issue"].execution_status == expected_status
+
+
 def test_resiliency_metrics_are_emitted() -> None:
     repository = InMemoryWorkflowRepository()
     workflow = repository.save_workflow(_workflow([_node("ticket")]))
@@ -273,12 +335,12 @@ def _node(
     )
 
 
-def _ok() -> GatewayToolResponse:
+def _ok(data: dict[str, Any] | None = None) -> GatewayToolResponse:
     return GatewayToolResponse(
         ok=True,
         decision=GatewayDecision.ALLOWED,
         correlation_id=uuid4(),
-        data={"tool_result": {"ok": True}},
+        data={"tool_result": {"ok": True, "data": data or {}}},
     )
 
 

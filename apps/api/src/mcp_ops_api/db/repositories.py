@@ -10,6 +10,7 @@ from mcp_ops_ai_agent.workflows.models import (
     RetryStrategy,
     Workflow,
     WorkflowAuditEvent,
+    WorkflowCondition,
     WorkflowEdge,
     WorkflowNode,
     WorkflowNodeStatus,
@@ -223,6 +224,9 @@ class WorkflowRepository(Repository[WorkflowModel]):
                 ],
                 depends_on=node.depends_on,
                 condition=node.condition,
+                typed_condition=node.typed_condition.model_dump(mode="json")
+                if node.typed_condition
+                else None,
                 risk_level=node.risk_level,
                 approval_required=node.approval_required,
                 execution_status=node.execution_status.value,
@@ -321,6 +325,9 @@ def _workflow_from_model(model: WorkflowModel) -> Workflow:
                 ],
                 depends_on=node.depends_on,
                 condition=node.condition,
+                typed_condition=WorkflowCondition.model_validate(node.typed_condition)
+                if node.typed_condition
+                else None,
                 risk_level=node.risk_level,
                 approval_required=node.approval_required,
                 execution_status=WorkflowNodeStatus(node.execution_status),

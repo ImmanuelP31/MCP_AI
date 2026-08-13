@@ -23,8 +23,22 @@ def resolve_node_arguments(
         output = dependency_outputs.get(source_node_id)
         if output is None:
             raise ArgumentBindingError(f"Dependency output {source_node_id} is not available.")
-        arguments[argument] = _read_path(output, output_path)
+        arguments[argument] = read_output_path(output, output_path)
     return node.model_copy(update={"arguments": arguments}, deep=True)
+
+
+def normalize_tool_output(payload: dict[str, Any]) -> dict[str, Any]:
+    """Convert gateway/MCP envelopes into the canonical dependency-output shape."""
+    if "tool_result" in payload:
+        tool_result = payload["tool_result"]
+        if isinstance(tool_result, dict):
+            if "data" in tool_result:
+                return {"ok": tool_result.get("ok", True), "data": tool_result["data"]}
+            return {"ok": tool_result.get("ok", True), "data": tool_result}
+        return {"ok": True, "data": tool_result}
+    if "data" in payload:
+        return {"ok": payload.get("ok", True), "data": payload["data"]}
+    return {"ok": True, "data": payload}
 
 
 def _reference_value(reference: Any, field_name: str) -> str:
@@ -37,7 +51,7 @@ def _reference_value(reference: Any, field_name: str) -> str:
     return value
 
 
-def _read_path(payload: Any, path: str) -> Any:
+def read_output_path(payload: Any, path: str) -> Any:
     current = payload
     for segment in path.replace("[", ".").replace("]", "").split("."):
         if not segment:

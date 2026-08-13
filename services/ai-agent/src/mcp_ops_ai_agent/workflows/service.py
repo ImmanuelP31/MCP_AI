@@ -29,7 +29,15 @@ from mcp_ops_ai_agent.engineering_rag.models import (
 from mcp_ops_ai_agent.gateway import GatewayClient, McpGatewayClient
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService
 from mcp_ops_ai_agent.tool_discovery.models import ToolDocument
-from mcp_ops_ai_agent.workflows.arguments import ArgumentBindingError, resolve_node_arguments
+from mcp_ops_ai_agent.workflows.arguments import (
+    ArgumentBindingError,
+    normalize_tool_output,
+    resolve_node_arguments,
+)
+from mcp_ops_ai_agent.workflows.conditions import (
+    ConditionEvaluationError,
+    condition_is_satisfied,
+)
 from mcp_ops_ai_agent.workflows.events import (
     InMemoryWorkflowEventPublisher,
     WorkflowEventPublisher,
@@ -387,7 +395,20 @@ class WorkflowPlanningService:
                 updated = self._replace_nodes(updated, nodes_by_id)
                 updated = self._checkpoint(updated, "workflow.node.blocked", node_id=node.id)
                 continue
-            if node.condition and not _condition_is_satisfied(node.condition):
+            try:
+                condition_result = condition_is_satisfied(node, node_outputs)
+            except ConditionEvaluationError as exc:
+                nodes_by_id[node.id] = node.model_copy(
+                    update={
+                        "execution_status": WorkflowNodeStatus.BLOCKED,
+                        "last_error": f"condition evaluation failed: {exc}",
+                    }
+                )
+                updated = self._replace_nodes(updated, nodes_by_id)
+                updated = self._checkpoint(updated, "workflow.node.failed", node_id=node.id)
+                record_workflow_execution_failure(role=role, reason="condition_evaluation_failed")
+                return self._finish_workflow(updated, role, started)
+            if not condition_result:
                 nodes_by_id[node.id] = node.model_copy(
                     update={"execution_status": WorkflowNodeStatus.SKIPPED}
                 )
@@ -534,7 +555,7 @@ class WorkflowPlanningService:
                     node_id=node.id,
                 )
             if response.ok and isinstance(response.data, dict):
-                node_outputs[node.id] = dict(response.data)
+                node_outputs[node.id] = normalize_tool_output(dict(response.data))
                 succeeded_node = running_node.model_copy(
                     update={
                         "execution_status": WorkflowNodeStatus.SUCCEEDED,
@@ -859,10 +880,6 @@ def _embedding_provider_name(discovery: object) -> str:
     ):
         return wrapped_provider.lower()
     return "unknown"
-
-
-def _condition_is_satisfied(condition: str) -> bool:
-    return "source_code_failure" not in condition
 
 
 def _can_be_resumed(node: WorkflowNode) -> bool:

@@ -590,6 +590,7 @@ class WorkflowNodeModel(UuidPkMixin, TimestampMixin, VersionedMixin, Base):
     argument_references: Mapped[list[JsonDict]] = mapped_column(JSON, nullable=False, default=list)
     depends_on: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     condition: Mapped[str | None] = mapped_column(Text)
+    typed_condition: Mapped[JsonDict | None] = mapped_column(JSON)
     risk_level: Mapped[str] = mapped_column(String(32), nullable=False)
     approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
     execution_status: Mapped[str] = mapped_column(String(32), nullable=False)

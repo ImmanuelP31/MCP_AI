@@ -254,17 +254,17 @@ See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 | --- | --- |
 | MCP gateway and domain servers | Implemented and covered by tests |
 | GitHub failed-build vertical slice | Live validated against `ImmanuelP31/mcp-ai-demo-target` |
-| Gemini workflow planner | Implemented; live benchmark must be run separately and labeled |
+| Gemini workflow planner | Implemented; live 50-case held-out evaluation completed and labeled |
 | Gemini embeddings | Implemented for live semantic retrieval; hashing remains the deterministic baseline |
 | OpenSearch RAG adapter | Live validated locally for repository-document retrieval |
 | 330-case benchmark | Deterministic/mock regression baseline |
-| 50-case held-out adversarial benchmark | Dataset added; live evaluation run pending |
+| 50-case held-out adversarial benchmark | Live Gemini planner run completed: 5/50 valid workflows; failure taxonomy instrumentation added |
 | Enterprise SSO/OIDC | Not implemented; JWT boundary is present for integration |
 | Docker Compose | Local validation topology, not production deployment |
 
 ## Limitations
 
-- Current benchmark results are deterministic mock results unless a live model provider is configured.
+- Mock benchmark results are deterministic; live Gemini benchmark results are labeled separately with provider/model provenance.
 - Live LLM planning and live embeddings now use Gemini for the recommended demo path. OpenAI remains a legacy-compatible provider in code, but no OpenAI key is required for the current live demo.
 - `HashingEmbeddingProvider` is a deterministic feature-hashing retrieval baseline with synonym expansion, not a learned semantic embedding model.
 - Deterministic planner confidence values are heuristic hints, not calibrated model-confidence estimates.

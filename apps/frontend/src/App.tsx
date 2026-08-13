@@ -771,6 +771,12 @@ interface WorkflowNode {
   }[];
   depends_on: string[];
   condition: string | null;
+  typed_condition: {
+    source_node_id: string;
+    output_path: string;
+    operator: "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "contains" | "exists";
+    value: unknown;
+  } | null;
   risk_level: RiskLevel;
   approval_required: boolean;
   execution_status: string;

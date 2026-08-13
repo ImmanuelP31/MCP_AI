@@ -35,6 +35,28 @@ def render_markdown_report(payload: Any) -> str:
             f"{_number(summary['approval_classification_accuracy']):.4f} | "
             f"{_number(summary['end_to_end_latency_ms']):.2f} |"
         )
+    failure_counts: dict[tuple[str, str], int] = {}
+    for item in payload.cases:
+        if item.get("workflow_valid"):
+            continue
+        stage = str(item.get("error_stage") or "unknown")
+        reason = str(item.get("error_reason") or item.get("error") or "unknown")
+        failure_counts[(stage, reason)] = failure_counts.get((stage, reason), 0) + 1
+    if failure_counts:
+        lines.extend(
+            [
+                "",
+                "## Failure Taxonomy",
+                "",
+                "| Error Stage | Error Reason | Cases |",
+                "| --- | --- | ---: |",
+            ]
+        )
+        for (stage, reason), count in sorted(
+            failure_counts.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )[:12]:
+            lines.append(f"| {stage} | {_escape(reason[:180])} | {count} |")
     lines.extend(
         [
             "",
@@ -70,3 +92,7 @@ def render_markdown_report(payload: Any) -> str:
 
 def _number(value: object) -> float:
     return float(value) if isinstance(value, int | float) else 0.0
+
+
+def _escape(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")

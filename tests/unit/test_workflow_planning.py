@@ -58,6 +58,8 @@ def test_dag_workflow_contains_conditional_ticket_step() -> None:
     nodes = {node.id: node for node in result.workflow.nodes}
     assert "failure_analysis" in nodes
     assert nodes["create_ticket"].condition == "failure_analysis.source == 'source_code_failure'"
+    assert nodes["create_ticket"].typed_condition is not None
+    assert nodes["create_ticket"].typed_condition.output_path == "data.source"
     assert any(edge.condition == "source_code_failure" for edge in result.workflow.edges)
 
 
@@ -177,7 +179,7 @@ def test_high_risk_workflow_is_flagged_for_approval_without_model_token() -> Non
 def test_planner_malformed_json_is_rejected() -> None:
     service = WorkflowPlanningService(planner=JsonWorkflowPlanner("{"))
 
-    with pytest.raises(PlannerOutputError):
+    with pytest.raises(PlannerOutputError) as exc_info:
         service.plan(
             WorkflowPlanRequest(
                 user_request="Plan a build workflow.",
@@ -185,6 +187,29 @@ def test_planner_malformed_json_is_rejected() -> None:
                 created_by="engineer",
             )
         )
+
+    assert exc_info.value.stage == "json_parse"
+    assert exc_info.value.reason
+
+
+def test_llm_workflow_planner_records_retry_failure_reason() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Check why the latest build failed.",
+        role="ENGINEER",
+        top_k=10,
+    )
+    client = FakeWorkflowPlanClient(["{", "{"])
+
+    with pytest.raises(PlannerOutputError) as exc_info:
+        LLMWorkflowPlanner(client, model_name="test-model").plan(
+            "Check why the latest build failed.",
+            tools,
+            role="ENGINEER",
+        )
+
+    assert exc_info.value.retry_attempted is True
+    assert exc_info.value.retry_failure_reason
 
 
 class FakeWorkflowPlanClient:
@@ -314,7 +339,7 @@ def test_llm_workflow_planner_preserves_safe_arguments_and_typed_references() ->
     assert logs.arguments["repository"] == "ImmanuelP31/MCP_AI"
     assert logs.argument_references[0].argument == "job_id"
     assert logs.argument_references[0].source_node_id == "failed_jobs"
-    assert logs.argument_references[0].output_path == "jobs.0.id"
+    assert logs.argument_references[0].output_path == "data.jobs.0.id"
 
 
 def test_runtime_argument_references_bind_from_dependency_outputs() -> None:

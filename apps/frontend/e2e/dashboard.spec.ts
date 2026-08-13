@@ -29,7 +29,7 @@ test("operator can navigate core enterprise dashboard routes", async ({ page }) 
   await expect(page.getByText("Capability graph")).toBeVisible();
 
   await page.getByRole("button", { name: "Security" }).click();
-  await expect(page.getByRole("heading", { name: "Security" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Security", level: 1 })).toBeVisible();
   await expect(page.getByText("Control-plane security")).toBeVisible();
 
   await page.getByRole("button", { name: "System" }).click();

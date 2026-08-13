@@ -99,6 +99,7 @@ class WorkflowValidator:
 
         issues.extend(_validate_dependencies(draft.nodes, node_id_set))
         issues.extend(_validate_argument_references(draft.nodes, node_id_set))
+        issues.extend(_validate_typed_conditions(draft.nodes, node_id_set))
         issues.extend(_validate_edges(draft, node_id_set))
         issues.extend(_validate_acyclic(draft))
         if issues:
@@ -290,6 +291,43 @@ def _validate_argument_references(
                         node.id,
                     )
                 )
+    return issues
+
+
+def _validate_typed_conditions(
+    nodes: list[WorkflowNode],
+    node_ids: set[str],
+) -> list[WorkflowValidationIssue]:
+    issues: list[WorkflowValidationIssue] = []
+    safe_path = re.compile(r"^[A-Za-z0-9_.\[\]-]{1,240}$")
+    for node in nodes:
+        condition = node.typed_condition
+        if condition is None:
+            continue
+        if condition.source_node_id not in node_ids:
+            issues.append(
+                _issue(
+                    "invalid_condition",
+                    f"Condition source {condition.source_node_id} does not exist.",
+                    node.id,
+                )
+            )
+        if condition.source_node_id not in set(node.depends_on):
+            issues.append(
+                _issue(
+                    "invalid_condition",
+                    f"Condition source {condition.source_node_id} must be a dependency.",
+                    node.id,
+                )
+            )
+        if safe_path.match(condition.output_path) is None:
+            issues.append(
+                _issue(
+                    "invalid_condition",
+                    f"Condition output path {condition.output_path} is unsafe.",
+                    node.id,
+                )
+            )
     return issues
 
 
