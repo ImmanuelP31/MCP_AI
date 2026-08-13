@@ -27,7 +27,7 @@ GITHUB_REPO=MCP_AI
 GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target
 
 GEMINI_API_KEY=replace-with-valid-gemini-key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 LLM_PLANNER_PROVIDER=gemini
 LLM_PROVIDER=gemini
 EMBEDDING_PROVIDER=gemini
@@ -116,7 +116,7 @@ With a valid Gemini key for live workflow planning:
 
 ```powershell
 $env:LLM_PLANNER_PROVIDER="gemini"
-$env:GEMINI_MODEL="gemini-2.5-flash"
+$env:GEMINI_MODEL="gemini-3.5-flash"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 10
 ```
 

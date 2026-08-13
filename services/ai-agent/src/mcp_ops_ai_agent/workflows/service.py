@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from mcp_ops_mcp_gateway.models import GatewayDecision, GatewayToolRequest, GatewayToolResponse
@@ -28,6 +29,7 @@ from mcp_ops_ai_agent.engineering_rag.models import (
 from mcp_ops_ai_agent.gateway import GatewayClient, McpGatewayClient
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService
 from mcp_ops_ai_agent.tool_discovery.models import ToolDocument
+from mcp_ops_ai_agent.workflows.arguments import ArgumentBindingError, resolve_node_arguments
 from mcp_ops_ai_agent.workflows.events import (
     InMemoryWorkflowEventPublisher,
     WorkflowEventPublisher,
@@ -225,6 +227,10 @@ class WorkflowPlanningService:
             discovered_tools=[result.as_payload() for result in discovery_response.ranked_tools],
             capability_path=capability_path.as_payload() if capability_path else None,
             retrieved_knowledge=knowledge_payload,
+            planner_provider=self.planner.planner_provider,
+            planner_model=saved.planner_model,
+            embedding_provider=_embedding_provider_name(self.discovery),
+            retrieval_backend=discovery_response.index_backend,
         )
 
     def get_workflow(self, workflow_id: UUID) -> Workflow:
@@ -342,6 +348,17 @@ class WorkflowPlanningService:
         )
         updated = self._checkpoint(updated, "workflow.started")
         nodes_by_id = {node.id: node for node in updated.nodes}
+        node_outputs: dict[str, dict[str, Any]] = {
+            node.id: {"result_reference": node.result_reference}
+            for node in updated.nodes
+            if node.execution_status
+            in {
+                WorkflowNodeStatus.SUCCEEDED,
+                WorkflowNodeStatus.COMPENSATED,
+                WorkflowNodeStatus.SKIPPED,
+            }
+            and node.result_reference is not None
+        }
         completed: set[str] = {
             node.id
             for node in updated.nodes
@@ -416,7 +433,13 @@ class WorkflowPlanningService:
                 updated = self._checkpoint(updated, "workflow.node.failed", node_id=node.id)
                 record_workflow_execution_failure(role=role, reason="additional_context_required")
                 continue
-            outcome = self._execute_node_with_recovery(policy_node, role, updated, nodes_by_id)
+            outcome = self._execute_node_with_recovery(
+                policy_node,
+                role,
+                updated,
+                nodes_by_id,
+                node_outputs,
+            )
             updated = outcome
             nodes_by_id = {item.id: item for item in updated.nodes}
             latest = nodes_by_id[node.id]
@@ -439,6 +462,7 @@ class WorkflowPlanningService:
         role: str,
         workflow: Workflow,
         nodes_by_id: dict[str, WorkflowNode],
+        node_outputs: dict[str, dict[str, Any]],
     ) -> Workflow:
         current = workflow
         while True:
@@ -456,7 +480,19 @@ class WorkflowPlanningService:
             current = self._replace_nodes(current, nodes_by_id)
             current = self._checkpoint(current, "workflow.node.started", node_id=node.id)
             try:
+                bound_node = resolve_node_arguments(running_node, node_outputs)
+                if bound_node.arguments != running_node.arguments:
+                    nodes_by_id[node.id] = bound_node
+                    current = self._replace_nodes(current, nodes_by_id)
+                    current = self._checkpoint(
+                        current,
+                        "workflow.node.arguments_bound",
+                        node_id=node.id,
+                    )
+                    running_node = bound_node
                 response = self._execute_node(running_node, role)
+            except ArgumentBindingError as exc:
+                response = _failure_response(running_node, "argument_binding_failed", str(exc))
             except TimeoutError as exc:
                 response = _failure_response(running_node, "timeout", str(exc))
             except ConnectionError as exc:
@@ -498,6 +534,7 @@ class WorkflowPlanningService:
                     node_id=node.id,
                 )
             if response.ok and isinstance(response.data, dict):
+                node_outputs[node.id] = dict(response.data)
                 succeeded_node = running_node.model_copy(
                     update={
                         "execution_status": WorkflowNodeStatus.SUCCEEDED,
@@ -806,6 +843,22 @@ def _topological_nodes(nodes: list[WorkflowNode]) -> list[WorkflowNode]:
             ordered.append(node)
             del remaining[node.id]
     return ordered
+
+
+def _embedding_provider_name(discovery: object) -> str:
+    settings = getattr(discovery, "settings", None)
+    provider = getattr(settings, "embedding_provider", None)
+    if isinstance(provider, str):
+        return provider.lower()
+    wrapped = getattr(discovery, "wrapped", None)
+    wrapped_settings = getattr(wrapped, "settings", None)
+    wrapped_provider = getattr(wrapped_settings, "embedding_provider", None)
+    if wrapped_settings is not None and isinstance(
+        wrapped_provider,
+        str,
+    ):
+        return wrapped_provider.lower()
+    return "unknown"
 
 
 def _condition_is_satisfied(condition: str) -> bool:

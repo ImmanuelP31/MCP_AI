@@ -60,7 +60,7 @@ Live demo mode:
 
 ```env
 GEMINI_API_KEY=your-valid-gemini-key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 LLM_PLANNER_PROVIDER=gemini
 ```
 
@@ -71,6 +71,35 @@ OpenRouter remains supported for planner comparison by setting `OPENROUTER_API_K
 (`nodes`, `steps`, or `tool_sequence`) into the strict `WorkflowPlanDraft` schema. That normalized
 draft is still untrusted. The backend validator then checks tool existence, discovered-tool
 membership, arguments, DAG structure, size limits, RBAC, risk, and approval policy.
+
+Live planner configuration fails closed in production and real-evaluation mode. If
+`LLM_PLANNER_PROVIDER=gemini` is requested without a valid `GEMINI_API_KEY`, planning raises a
+configuration error instead of silently switching to the deterministic planner. Deterministic
+fallback is reserved for explicitly configured development/test paths.
+
+## Argument Binding
+
+The LLM may propose concrete arguments, but trusted registry metadata still controls tool identity,
+server, risk, and approval requirements. Proposed arguments are accepted only when they match the
+tool input schema and resource allowlist checks.
+
+For values that should come from earlier workflow steps, the planner can emit typed references:
+
+```json
+{
+  "id": "logs",
+  "tool_name": "get_pipeline_logs",
+  "depends_on": ["failed_jobs"],
+  "arguments": {
+    "repository": "ImmanuelP31/MCP_AI",
+    "job_id": { "$from": "failed_jobs.jobs.0.id" }
+  }
+}
+```
+
+The backend stores this as an `argument_references` record, validates that the source is an actual
+dependency, and resolves it immediately before execution. The resolved arguments are checkpointed
+before gateway routing, approval binding, idempotency hashing, and audit logging.
 
 Policy can transform a proposed plan:
 

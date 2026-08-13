@@ -26,13 +26,24 @@ def main() -> None:
         choices=["mock", "real"],
         help="Use mock for deterministic CI; real labels provider-backed runs.",
     )
+    parser.add_argument(
+        "--dataset",
+        default="synthetic",
+        choices=["synthetic", "heldout_adversarial"],
+        help="Benchmark dataset to evaluate.",
+    )
     args = parser.parse_args()
     configs = (
         evaluation_configs()
         if args.config == "all"
         else (config_by_name(args.config),)
     )
-    result = run_evaluation(selected_configs=configs, limit=args.limit, mode=args.mode)
+    result = run_evaluation(
+        selected_configs=configs,
+        limit=args.limit,
+        mode=args.mode,
+        dataset_name=args.dataset,
+    )
     for summary in result.summaries:
         print(
             "{config}: cases={cases} valid={workflow_validity_rate:.3f} "

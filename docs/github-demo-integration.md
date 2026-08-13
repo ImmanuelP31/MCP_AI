@@ -96,7 +96,7 @@ For a live AI demo, set:
 
 ```env
 GEMINI_API_KEY=your-valid-gemini-key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 LLM_PROVIDER=gemini
 LLM_PLANNER_PROVIDER=gemini

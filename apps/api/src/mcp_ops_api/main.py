@@ -186,6 +186,10 @@ class WorkflowApiResponse(StrictModel):
     discovered_tools: list[dict[str, Any]] = Field(default_factory=list)
     capability_path: dict[str, Any] | None = None
     retrieved_knowledge: list[dict[str, Any]] = Field(default_factory=list)
+    planner_provider: str = "deterministic"
+    planner_model: str = ""
+    embedding_provider: str = "unknown"
+    retrieval_backend: str = "unknown"
 
 
 class KnowledgeSearchApiRequest(StrictModel):

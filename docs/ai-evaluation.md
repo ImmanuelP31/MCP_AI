@@ -62,7 +62,7 @@ planner smoke, rerun:
 
 ```powershell
 $env:LLM_PLANNER_PROVIDER="gemini"
-$env:GEMINI_MODEL="gemini-2.5-flash"
+$env:GEMINI_MODEL="gemini-3.5-flash"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 
@@ -76,7 +76,7 @@ Live provider smoke:
 
 ```powershell
 $env:LLM_PLANNER_PROVIDER="gemini"
-$env:GEMINI_MODEL="gemini-2.5-flash"
+$env:GEMINI_MODEL="gemini-3.5-flash"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 

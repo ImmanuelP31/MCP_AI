@@ -4,10 +4,12 @@ import json
 from typing import Any
 
 import pytest
+from mcp_ops_ai_agent.workflows.arguments import resolve_node_arguments
 from mcp_ops_ai_agent.workflows.models import WorkflowNode, WorkflowPlanDraft, WorkflowPlanRequest
 from mcp_ops_ai_agent.workflows.planner import (
     JsonWorkflowPlanner,
     LLMWorkflowPlanner,
+    PlannerConfigurationError,
     PlannerOutputError,
     workflow_planner_from_settings,
 )
@@ -32,6 +34,8 @@ def test_valid_linear_workflow_is_planned_from_authorized_tools() -> None:
 
     assert result.ok is True
     assert result.workflow.status == "VALIDATED"
+    assert result.planner_provider == "deterministic"
+    assert result.retrieval_backend
     assert [node.tool_name for node in result.workflow.nodes][-1] == "create_ticket"
     assert result.workflow.edges
 
@@ -271,6 +275,71 @@ def test_llm_workflow_planner_fills_trusted_tool_metadata_and_arguments() -> Non
     assert node.arguments == {"repository": "ImmanuelP31/MCP_AI"}
 
 
+def test_llm_workflow_planner_preserves_safe_arguments_and_typed_references() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Get failed jobs and then retrieve logs for the failed job.",
+        role="ENGINEER",
+        top_k=20,
+    )
+    payload = {
+        "confidence": 0.8,
+        "nodes": [
+            {
+                "id": "failed_jobs",
+                "tool_name": "get_failed_jobs",
+                "arguments": {"repository": "ImmanuelP31/MCP_AI", "run_id": 481},
+            },
+            {
+                "id": "logs",
+                "tool_name": "get_pipeline_logs",
+                "depends_on": ["failed_jobs"],
+                "arguments": {
+                    "repository": "ImmanuelP31/MCP_AI",
+                    "job_id": {"$from": "failed_jobs.jobs.0.id"},
+                },
+            },
+        ],
+    }
+    client = FakeWorkflowPlanClient([json.dumps(payload)])
+
+    draft = LLMWorkflowPlanner(client, model_name="test-model").plan(
+        "Get failed jobs and then retrieve logs for the failed job.",
+        tools,
+        role="ENGINEER",
+    )
+
+    failed_jobs, logs = draft.nodes
+    assert failed_jobs.arguments["run_id"] == 481
+    assert logs.arguments["repository"] == "ImmanuelP31/MCP_AI"
+    assert logs.argument_references[0].argument == "job_id"
+    assert logs.argument_references[0].source_node_id == "failed_jobs"
+    assert logs.argument_references[0].output_path == "jobs.0.id"
+
+
+def test_runtime_argument_references_bind_from_dependency_outputs() -> None:
+    node = _node(
+        "logs",
+        "get_pipeline_logs",
+        arguments={"repository": "ImmanuelP31/MCP_AI", "job_id": 0},
+    ).model_copy(
+        update={
+            "depends_on": ["failed_jobs"],
+            "argument_references": [
+                {
+                    "argument": "job_id",
+                    "source_node_id": "failed_jobs",
+                    "output_path": "jobs.0.id",
+                }
+            ],
+        }
+    )
+
+    bound = resolve_node_arguments(node, {"failed_jobs": {"jobs": [{"id": 777}]}})
+
+    assert bound.arguments["job_id"] == 777
+
+
 def test_workflow_planner_from_settings_supports_openrouter_provider() -> None:
     planner = workflow_planner_from_settings(
         Settings(
@@ -293,6 +362,31 @@ def test_workflow_planner_from_settings_supports_gemini_provider() -> None:
     )
 
     assert planner.planner_model == "llm-workflow-planner:gemini-test-model"
+
+
+def test_workflow_planner_from_settings_fails_closed_for_missing_live_provider() -> None:
+    with pytest.raises(PlannerConfigurationError):
+        workflow_planner_from_settings(
+            Settings(
+                environment="production",
+                llm_planner_provider="gemini",
+                gemini_api_key="",
+            ),
+            allow_fallback=False,
+        )
+
+
+def test_workflow_planner_from_settings_allows_explicit_development_fallback() -> None:
+    planner = workflow_planner_from_settings(
+        Settings(
+            environment="development",
+            llm_planner_provider="gemini",
+            gemini_api_key="",
+        ),
+        allow_fallback=True,
+    )
+
+    assert planner.planner_model == "deterministic-workflow-planner-v1"
 
 
 def test_planner_hallucinated_tool_is_rejected() -> None:

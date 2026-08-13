@@ -136,7 +136,7 @@ GITHUB_REPO=MCP_AI
 GITHUB_ALLOWED_REPOSITORIES=ImmanuelP31/MCP_AI,ImmanuelP31/mcp-ai-demo-target
 
 GEMINI_API_KEY=your-valid-gemini-key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 LLM_PLANNER_PROVIDER=gemini
 LLM_PROVIDER=gemini
 EMBEDDING_PROVIDER=gemini

@@ -98,6 +98,7 @@ class WorkflowValidator:
             normalized_nodes.append(_classify_risk(node, metadata))
 
         issues.extend(_validate_dependencies(draft.nodes, node_id_set))
+        issues.extend(_validate_argument_references(draft.nodes, node_id_set))
         issues.extend(_validate_edges(draft, node_id_set))
         issues.extend(_validate_acyclic(draft))
         if issues:
@@ -242,6 +243,50 @@ def _validate_dependencies(
                     _issue(
                         "missing_dependency",
                         f"Dependency {dependency} does not exist.",
+                        node.id,
+                    )
+                )
+    return issues
+
+
+def _validate_argument_references(
+    nodes: list[WorkflowNode],
+    node_ids: set[str],
+) -> list[WorkflowValidationIssue]:
+    issues: list[WorkflowValidationIssue] = []
+    safe_path = re.compile(r"^[A-Za-z0-9_.\[\]-]{1,240}$")
+    for node in nodes:
+        dependencies = set(node.depends_on)
+        for reference in node.argument_references:
+            if reference.argument not in node.arguments:
+                issues.append(
+                    _issue(
+                        "invalid_argument_reference",
+                        f"Reference target {reference.argument} is not a node argument.",
+                        node.id,
+                    )
+                )
+            if reference.source_node_id not in node_ids:
+                issues.append(
+                    _issue(
+                        "invalid_argument_reference",
+                        f"Reference source {reference.source_node_id} does not exist.",
+                        node.id,
+                    )
+                )
+            if reference.source_node_id not in dependencies:
+                issues.append(
+                    _issue(
+                        "invalid_argument_reference",
+                        f"Reference source {reference.source_node_id} must be a dependency.",
+                        node.id,
+                    )
+                )
+            if safe_path.match(reference.output_path) is None:
+                issues.append(
+                    _issue(
+                        "invalid_argument_reference",
+                        f"Reference output path {reference.output_path} is unsafe.",
                         node.id,
                     )
                 )

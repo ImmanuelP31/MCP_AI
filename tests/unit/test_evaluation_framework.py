@@ -12,6 +12,8 @@ from evaluation.metrics import (
     precision,
     recall,
 )
+from evaluation.runner import run_evaluation
+from evaluation.scenarios import config_by_name
 
 
 def test_synthetic_dataset_contains_at_least_300_enterprise_engineering_tasks() -> None:
@@ -42,6 +44,19 @@ def test_heldout_adversarial_dataset_contains_independent_eval_cases() -> None:
     assert all(isinstance(item["expected_tools"], list) for item in items)
     assert all(isinstance(item["prohibited_tools"], list) for item in items)
     assert all(isinstance(item["relevant_documents"], list) for item in items)
+
+
+def test_heldout_adversarial_dataset_can_be_selected_by_runner() -> None:
+    result = run_evaluation(
+        selected_configs=(config_by_name("semantic_rag_graph"),),
+        dataset_name="heldout_adversarial",
+        limit=2,
+        output=False,
+    )
+
+    assert len(result.cases) == 2
+    assert result.cases[0]["id"] == "HELDOUT-001"
+    assert result.cases[0]["category"] == "heldout adversarial"
 
 
 def test_precision_recall_exact_accuracy_and_mrr_are_computed() -> None:

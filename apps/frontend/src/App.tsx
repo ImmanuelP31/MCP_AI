@@ -764,6 +764,11 @@ interface WorkflowNode {
   tool_server: string;
   description: string;
   arguments: Record<string, unknown>;
+  argument_references: {
+    argument: string;
+    source_node_id: string;
+    output_path: string;
+  }[];
   depends_on: string[];
   condition: string | null;
   risk_level: RiskLevel;
@@ -862,6 +867,10 @@ interface WorkflowApiResponse {
   validation_issues?: Array<{ code: string; message: string; node_id?: string | null }>;
   capability_path?: CapabilityPathResponse | null;
   retrieved_knowledge?: KnowledgeSearchResult[];
+  planner_provider?: string;
+  planner_model?: string;
+  embedding_provider?: string;
+  retrieval_backend?: string;
 }
 
 interface EvaluationSummary {

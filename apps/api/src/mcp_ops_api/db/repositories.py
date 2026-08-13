@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import TypeVar
 
 from mcp_ops_ai_agent.workflows.models import (
+    ArgumentReference,
     RetryStrategy,
     Workflow,
     WorkflowAuditEvent,
@@ -217,6 +218,9 @@ class WorkflowRepository(Repository[WorkflowModel]):
                 tool_server=node.tool_server,
                 description=node.description,
                 arguments=node.arguments,
+                argument_references=[
+                    reference.model_dump(mode="json") for reference in node.argument_references
+                ],
                 depends_on=node.depends_on,
                 condition=node.condition,
                 risk_level=node.risk_level,
@@ -311,6 +315,10 @@ def _workflow_from_model(model: WorkflowModel) -> Workflow:
                 tool_server=node.tool_server,
                 description=node.description,
                 arguments=node.arguments,
+                argument_references=[
+                    ArgumentReference.model_validate(reference)
+                    for reference in node.argument_references
+                ],
                 depends_on=node.depends_on,
                 condition=node.condition,
                 risk_level=node.risk_level,

@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     openrouter_app_url: str = "https://github.com/ImmanuelP31/MCP_AI"
     openrouter_app_name: str = "MCP Engineering Operations Platform"
     gemini_api_key: str = Field(default="", repr=False)
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
     llm_timeout_seconds: int = 20
     llm_planner_provider: str = "deterministic"
 

@@ -79,6 +79,12 @@ class WorkflowEdge(StrictModel):
     condition: str | None = Field(default=None, max_length=300)
 
 
+class ArgumentReference(StrictModel):
+    argument: str = Field(min_length=1, max_length=120)
+    source_node_id: str = Field(min_length=1, max_length=120)
+    output_path: str = Field(min_length=1, max_length=240)
+
+
 class WorkflowNode(StrictModel):
     id: str = Field(min_length=1, max_length=120)
     workflow_id: UUID | None = None
@@ -86,6 +92,7 @@ class WorkflowNode(StrictModel):
     tool_server: str = Field(min_length=1, max_length=128)
     description: str = Field(min_length=1, max_length=500)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    argument_references: list[ArgumentReference] = Field(default_factory=list, max_length=20)
     depends_on: list[str] = Field(default_factory=list, max_length=20)
     condition: str | None = Field(default=None, max_length=300)
     risk_level: str = Field(min_length=1, max_length=32)
@@ -158,6 +165,10 @@ class WorkflowPlanResult(StrictModel):
     discovered_tools: list[dict[str, Any]] = Field(default_factory=list)
     capability_path: dict[str, Any] | None = None
     retrieved_knowledge: list[dict[str, Any]] = Field(default_factory=list)
+    planner_provider: str = Field(default="deterministic", min_length=1, max_length=64)
+    planner_model: str = Field(default="", max_length=120)
+    embedding_provider: str = Field(default="unknown", min_length=1, max_length=64)
+    retrieval_backend: str = Field(default="unknown", min_length=1, max_length=120)
 
     @property
     def ok(self) -> bool:
@@ -173,4 +184,8 @@ class WorkflowPlanResult(StrictModel):
             "discovered_tools": self.discovered_tools,
             "capability_path": self.capability_path,
             "retrieved_knowledge": self.retrieved_knowledge,
+            "planner_provider": self.planner_provider,
+            "planner_model": self.planner_model or self.workflow.planner_model,
+            "embedding_provider": self.embedding_provider,
+            "retrieval_backend": self.retrieval_backend,
         }

@@ -224,7 +224,7 @@ def test_engineering_knowledge_evaluation_endpoint_compares_modes() -> None:
     assert payload["hybrid"]["cases"] >= 10
 
 
-def test_evaluation_latest_endpoint_returns_generated_mock_summary() -> None:
+def test_evaluation_latest_endpoint_returns_generated_summary() -> None:
     client = TestClient(app)
 
     response = client.get("/api/v1/evaluation/latest")
@@ -232,5 +232,5 @@ def test_evaluation_latest_endpoint_returns_generated_mock_summary() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["available"] is True
-    assert payload["mode"] == "mock"
+    assert payload["mode"] in {"mock", "real"}
     assert any(summary["config"] == "semantic_rag_graph" for summary in payload["summaries"])

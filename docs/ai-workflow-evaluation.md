@@ -98,6 +98,12 @@ python -m evaluation.run --config all --mode real
 
 Real mode labels the output as provider-backed. The current deterministic planner remains the default CI path so normal tests do not require API keys or incur model cost. If model pricing is configured later, token and cost reporting should be wired to the provider abstraction and preserved in the same result schema.
 
+In real mode, planner and embedding providers fail closed. If `LLM_PLANNER_PROVIDER=gemini` or
+`EMBEDDING_PROVIDER=gemini` is requested without a valid key, the run records a configuration
+failure instead of silently measuring deterministic fallback behavior. Each case result includes
+`planner_provider`, `planner_model`, `embedding_provider`, `embedding_fallback_allowed`, and
+`retrieval_backend` so benchmark artifacts show what was actually exercised.
+
 ## Prometheus
 
 The runner records summary metrics through:
