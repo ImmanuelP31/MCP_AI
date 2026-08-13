@@ -176,6 +176,20 @@ def test_embedding_provider_from_settings_supports_gemini_with_hashing_fallback(
     assert vector
 
 
+def test_embedding_provider_from_settings_can_disable_fallback_for_real_evaluation() -> None:
+    provider = embedding_provider_from_settings(
+        Settings(
+            embedding_provider="gemini",
+            gemini_api_key="",
+            gemini_embedding_model="gemini-embedding-test",
+        ),
+        allow_fallback=False,
+    )
+
+    with pytest.raises(EmbeddingProviderUnavailable):
+        provider.embed("failed build logs")
+
+
 class FakeOpenSearchToolIndex(OpenSearchToolEmbeddingIndex):
     def __init__(self) -> None:
         super().__init__("http://opensearch:9200")

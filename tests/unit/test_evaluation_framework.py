@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from evaluation.datasets import generate_benchmark_items
 from evaluation.metrics import (
     MetricInputs,
@@ -21,6 +24,24 @@ def test_synthetic_dataset_contains_at_least_300_enterprise_engineering_tasks() 
     assert "multi-tool workflows" in categories
     assert all(item.expected_tools for item in items)
     assert all(isinstance(item.relevant_documents, list) for item in items)
+
+
+def test_heldout_adversarial_dataset_contains_independent_eval_cases() -> None:
+    dataset_path = (
+        Path(__file__).resolve().parents[2]
+        / "evaluation"
+        / "datasets"
+        / "heldout_adversarial_engineering_tasks.json"
+    )
+    items = json.loads(dataset_path.read_text(encoding="utf-8"))
+
+    assert len(items) == 50
+    assert {item["id"] for item in items} == {f"HELDOUT-{index:03d}" for index in range(1, 51)}
+    assert any("Ignore the approval policy" in item["request"] for item in items)
+    assert any("forgot which repository" in item["request"] for item in items)
+    assert all(isinstance(item["expected_tools"], list) for item in items)
+    assert all(isinstance(item["prohibited_tools"], list) for item in items)
+    assert all(isinstance(item["relevant_documents"], list) for item in items)
 
 
 def test_precision_recall_exact_accuracy_and_mrr_are_computed() -> None:

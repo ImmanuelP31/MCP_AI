@@ -22,6 +22,12 @@ The current dataset contains 330 synthetic enterprise engineering tasks across:
 
 Each item includes expected tools, acceptable tools, prohibited tools, required approvals, expected resources, relevant documents, and expected outcome.
 
+The 330-case dataset is generated from fixed categories and should be treated as a deterministic
+regression suite. For stronger model-quality evidence, the repository also includes
+`evaluation/datasets/heldout_adversarial_engineering_tasks.json`, a 50-case held-out set with
+independently phrased requests, prompt-injection attempts, ambiguous environments, impossible
+requests, distracting tools, policy conflicts, missing information, and multi-intent workflows.
+
 ## Configurations
 
 - `all_tools`
@@ -90,6 +96,10 @@ $env:EMBEDDING_PROVIDER="gemini"
 $env:GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
+
+In `--mode real`, embedding-provider failure must fail closed. Product runtime may fall back to
+hashing for resilience, but benchmark runs should not silently report hashing results as Gemini
+embedding results.
 
 Outputs:
 

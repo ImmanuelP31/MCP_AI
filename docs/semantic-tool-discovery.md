@@ -53,7 +53,7 @@ their MCP servers exist. The gateway rejects non-executable catalog entries.
 
 The retrieval service combines:
 
-- deterministic vector similarity from `HashingEmbeddingProvider`
+- deterministic feature-hashing retrieval baseline from `HashingEmbeddingProvider`
 - provider-backed embeddings from `GeminiEmbeddingProvider`
 - lexical/BM25-style scoring
 - metadata boosts for tags, category, and tool name
@@ -142,5 +142,5 @@ python -m pytest tests/unit/test_tool_discovery.py
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 
-Real-mode evaluation requires a valid provider key. The deterministic hashing provider remains the
-CI fallback and should be used for normal unit tests.
+Real-mode evaluation requires a valid provider key and must not silently fall back to hashing. The
+deterministic hashing provider remains the CI fallback and should be used for normal unit tests.

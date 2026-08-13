@@ -222,6 +222,11 @@ The deterministic benchmark currently contains 330 synthetic enterprise engineer
 - semantic retrieval + RAG
 - semantic retrieval + RAG + capability graph
 
+The generated 330-case benchmark is a regression suite, not a substitute for live model evaluation.
+The repository also includes a separate held-out adversarial dataset with 50 independently written
+cases covering paraphrases, vague requests, impossible requests, distracting tools, conflicting
+policies, multi-intent prompts, prompt injection, missing information, and ambiguous environments.
+
 Run:
 
 ```bash
@@ -243,10 +248,27 @@ See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 | Observability | Prometheus, Grafana, structured logs, request/correlation IDs |
 | DevOps | Docker Compose, pytest, Vitest, Playwright, ruff, mypy, Bandit |
 
+## Implementation Status
+
+| Area | Status |
+| --- | --- |
+| MCP gateway and domain servers | Implemented and covered by tests |
+| GitHub failed-build vertical slice | Live validated against `ImmanuelP31/mcp-ai-demo-target` |
+| Gemini workflow planner | Implemented; live benchmark must be run separately and labeled |
+| Gemini embeddings | Implemented for live semantic retrieval; hashing remains the deterministic baseline |
+| OpenSearch RAG adapter | Live validated locally for repository-document retrieval |
+| 330-case benchmark | Deterministic/mock regression baseline |
+| 50-case held-out adversarial benchmark | Dataset added; live evaluation run pending |
+| Enterprise SSO/OIDC | Not implemented; JWT boundary is present for integration |
+| Docker Compose | Local validation topology, not production deployment |
+
 ## Limitations
 
 - Current benchmark results are deterministic mock results unless a live model provider is configured.
 - Live LLM planning and live embeddings now use Gemini for the recommended demo path. OpenAI remains a legacy-compatible provider in code, but no OpenAI key is required for the current live demo.
+- `HashingEmbeddingProvider` is a deterministic feature-hashing retrieval baseline with synonym expansion, not a learned semantic embedding model.
+- Deterministic planner confidence values are heuristic hints, not calibrated model-confidence estimates.
+- Real-mode evaluation fails closed on embedding-provider errors instead of silently falling back to hashing.
 - OpenSearch-backed repository-document RAG was live validated locally with `OPENSEARCH_URL=http://localhost:9200`; Docker-internal service names such as `http://opensearch:9200` are for containers, not host-run scripts.
 - Live GitHub failed-build investigation was validated against the dedicated demo target `ImmanuelP31/mcp-ai-demo-target` with the controlled failing workflow, issue creation, approval-gated rerun request, approval, and rerun execution.
 - The local simulator and synthetic engineering corpus are demo/pilot assets.

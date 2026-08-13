@@ -50,7 +50,7 @@ where = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/contract", "tests/integration", "tests/security"]
-addopts = "-ra --strict-markers --strict-config --basetemp=logs/pytest-tmp"
+addopts = "-ra --strict-markers --strict-config"
 
 [tool.ruff]
 line-length = 100

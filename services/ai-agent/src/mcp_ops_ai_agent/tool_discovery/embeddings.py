@@ -205,26 +205,34 @@ class FallbackEmbeddingProvider:
             return self.fallback.embed(text)
 
 
-def embedding_provider_from_settings(settings: Settings | None = None) -> EmbeddingProvider:
+def embedding_provider_from_settings(
+    settings: Settings | None = None,
+    *,
+    allow_fallback: bool = True,
+) -> EmbeddingProvider:
     settings = settings or get_settings()
     hashing = HashingEmbeddingProvider()
     if settings.embedding_provider.lower() == "openai":
-        return FallbackEmbeddingProvider(
-            OpenAIEmbeddingProvider(
-                api_key=settings.openai_api_key,
-                model=settings.openai_embedding_model,
-                timeout_seconds=settings.embedding_timeout_seconds,
-            ),
-            hashing,
+        openai_provider: EmbeddingProvider = OpenAIEmbeddingProvider(
+            api_key=settings.openai_api_key,
+            model=settings.openai_embedding_model,
+            timeout_seconds=settings.embedding_timeout_seconds,
+        )
+        return (
+            FallbackEmbeddingProvider(openai_provider, hashing)
+            if allow_fallback
+            else openai_provider
         )
     if settings.embedding_provider.lower() == "gemini":
-        return FallbackEmbeddingProvider(
-            GeminiEmbeddingProvider(
-                api_key=settings.gemini_api_key,
-                model=settings.gemini_embedding_model,
-                timeout_seconds=settings.embedding_timeout_seconds,
-            ),
-            hashing,
+        gemini_provider: EmbeddingProvider = GeminiEmbeddingProvider(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_embedding_model,
+            timeout_seconds=settings.embedding_timeout_seconds,
+        )
+        return (
+            FallbackEmbeddingProvider(gemini_provider, hashing)
+            if allow_fallback
+            else gemini_provider
         )
     return hashing
 

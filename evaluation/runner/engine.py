@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from mcp_ops_ai_agent.engineering_rag import EngineeringRagService
+from mcp_ops_ai_agent.tool_discovery.embeddings import embedding_provider_from_settings
 from mcp_ops_ai_agent.tool_discovery.models import (
     ToolDiscoveryResponse,
     ToolDiscoveryResult,
@@ -18,6 +19,7 @@ from mcp_ops_ai_agent.workflows.models import WorkflowPlanRequest
 from mcp_ops_ai_agent.workflows.planner import workflow_planner_from_settings
 from mcp_ops_ai_agent.workflows.service import WorkflowPlanningService
 from mcp_ops_ai_agent.workflows.validator import WorkflowValidationError
+from mcp_ops_common.config import get_settings
 from mcp_ops_observability.metrics import record_ai_evaluation_summary
 
 from evaluation.datasets.synthetic import BenchmarkItem, generate_benchmark_items
@@ -52,6 +54,8 @@ class EvaluationCaseResult:
     end_to_end_latency_ms: float
     token_usage: int
     estimated_cost_usd: float | None
+    embedding_provider: str
+    embedding_fallback_allowed: bool
     error: str | None = None
 
 
@@ -156,15 +160,9 @@ def _evaluate_case(
     mode: str,
 ) -> tuple[EvaluationCaseResult, MetricInputs]:
     started = time.perf_counter()
-    base_discovery = ToolDiscoveryService()
-    discovery = AllToolsDiscovery(base_discovery) if config.use_all_tools else base_discovery
-    service = WorkflowPlanningService(
-        discovery=cast(ToolDiscoveryService, discovery),
-        rag=EngineeringRagService(),
-        planner=workflow_planner_from_settings() if mode == "real" else None,
-        use_rag=config.use_rag,
-        use_capability_graph=config.use_capability_graph,
-    )
+    settings = get_settings()
+    fallback_allowed = mode != "real"
+    embedding_provider_name = settings.embedding_provider.lower()
     actual_tools: list[str] = []
     actual_approvals: list[str] = []
     retrieved_documents: list[str] = []
@@ -172,6 +170,19 @@ def _evaluate_case(
     error: str | None = None
     planner_started = time.perf_counter()
     try:
+        embedding_provider = embedding_provider_from_settings(
+            settings,
+            allow_fallback=fallback_allowed,
+        )
+        base_discovery = ToolDiscoveryService(embedding_provider=embedding_provider)
+        discovery = AllToolsDiscovery(base_discovery) if config.use_all_tools else base_discovery
+        service = WorkflowPlanningService(
+            discovery=cast(ToolDiscoveryService, discovery),
+            rag=EngineeringRagService(embedding_provider=embedding_provider),
+            planner=workflow_planner_from_settings() if mode == "real" else None,
+            use_rag=config.use_rag,
+            use_capability_graph=config.use_capability_graph,
+        )
         result = service.plan(
             WorkflowPlanRequest(
                 user_request=item.request,
@@ -219,6 +230,8 @@ def _evaluate_case(
         end_to_end_latency_ms=round(e2e_latency_ms, 4),
         token_usage=token_usage,
         estimated_cost_usd=cost,
+        embedding_provider=embedding_provider_name,
+        embedding_fallback_allowed=fallback_allowed,
         error=error,
     )
     metric_input = MetricInputs(
