@@ -133,7 +133,7 @@ No LLM output is trusted for:
 LLM-only planning can hallucinate intermediate resources or jump directly from a repository to an unsupported action. The capability graph forces planning through declared tool edges, so the planner receives a smaller set of valid steps and can be evaluated against:
 
 - valid tool sequence rate
-- hallucinated tool rate
+- unknown/disallowed tool-call rate
 - policy violation rate
 - unnecessary tool count
 

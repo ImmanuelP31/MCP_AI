@@ -171,3 +171,36 @@ def test_summary_metrics_separate_provider_availability_from_planner_quality() -
     assert summary.approval_classification_accuracy == 1.0
     assert summary.workflow_validity_rate == 1.0
     assert summary.end_to_end_workflow_validity_rate == 0.5
+
+
+def test_unknown_tool_metrics_distinguish_call_rate_from_case_rate() -> None:
+    summary = compute_summary(
+        config="semantic_rag_graph",
+        mode="real",
+        inputs=[
+            MetricInputs(
+                expected_tools=["get_build_status"],
+                acceptable_tools=[],
+                actual_tools=["get_build_status"],
+                prohibited_tools=[],
+                required_approvals=[],
+                actual_approvals=[],
+                relevant_documents=[],
+                retrieved_documents=[],
+                workflow_valid=False,
+                workflow_completed=False,
+                execution_succeeded=False,
+                planner_latency_ms=10.0,
+                end_to_end_latency_ms=12.0,
+                token_usage=10,
+                estimated_cost_usd=0.01,
+                provider_success=True,
+                unknown_or_disallowed_tools=2,
+            )
+        ],
+    )
+
+    assert summary.unknown_tool_call_rate == 0.6667
+    assert summary.unknown_or_disallowed_tool_rate == 0.6667
+    assert summary.cases_with_unknown_tools_rate == 1.0
+    assert summary.unknown_or_disallowed_tools_per_case == 2.0

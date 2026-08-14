@@ -33,9 +33,10 @@ Date: 2026-08-11
 
 ## Latest Evaluation Metrics
 
-Mock-mode results from `evaluation/results/latest.json`.
+Mock-mode baseline results retained for comparison. The tracked `evaluation/results/latest.json`
+artifact reflects the latest committed evaluation run and may be mock or live.
 
-| Configuration | Cases | Tool Recall | Tool Precision | Workflow Validity | Hallucinated Tool Rate | RAG Recall@K | Execution Success |
+| Configuration | Cases | Tool Recall | Tool Precision | Workflow Validity | Unknown/Disallowed Tool Rate | RAG Recall@K | Execution Success |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | all_tools | 330 | 0.5379 | 0.8427 | 0.6545 | 0.2192 | 0.0000 | 0.5455 |
 | semantic | 330 | 0.5424 | 0.8710 | 0.7455 | 0.1761 | 0.0000 | 0.6364 |

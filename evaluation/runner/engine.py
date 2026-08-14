@@ -67,6 +67,7 @@ class EvaluationCaseResult:
     finish_reason: str | None = None
     retry_attempted: bool = False
     retry_failure_reason: str | None = None
+    failure_category: str | None = None
     error: str | None = None
 
 
@@ -323,6 +324,7 @@ def _evaluate_case(
     retry_attempted = False
     retry_failure_reason: str | None = None
     provider_success = True
+    failure_category: str | None = None
     unknown_or_disallowed_tools = 0
     planner_started = time.perf_counter()
     try:
@@ -354,6 +356,7 @@ def _evaluate_case(
         error = "; ".join(issue.code for issue in exc.issues)
         error_stage = "workflow_validation"
         error_type = exc.__class__.__name__
+        failure_category = "WORKFLOW_VALIDATION_FAILURE"
         error_reason = "; ".join(
             f"{issue.code}: {issue.message}" for issue in exc.issues[:3]
         )
@@ -371,12 +374,16 @@ def _evaluate_case(
         finish_reason = exc.finish_reason
         retry_attempted = exc.retry_attempted
         retry_failure_reason = exc.retry_failure_reason
-        provider_success = not exc.stage.startswith("provider_")
+        provider_success = not _is_provider_failure(exc.stage)
+        failure_category = (
+            "PROVIDER_FAILURE" if not provider_success else "PLANNER_OUTPUT_FAILURE"
+        )
     except Exception as exc:  # noqa: BLE001 - evaluation records failures as data
         error = exc.__class__.__name__
         error_stage = "runtime"
         error_type = exc.__class__.__name__
         error_reason = str(exc)[:500] or exc.__class__.__name__
+        failure_category = "EXECUTION_FAILURE"
     planner_latency_ms = (time.perf_counter() - planner_started) * 1000
     e2e_latency_ms = (time.perf_counter() - started) * 1000
     prohibited_attempted = bool(set(actual_tools) & set(item.prohibited_tools))
@@ -415,6 +422,7 @@ def _evaluate_case(
         finish_reason=finish_reason,
         retry_attempted=retry_attempted,
         retry_failure_reason=retry_failure_reason,
+        failure_category=failure_category,
         error=error,
     )
     metric_input = MetricInputs(
@@ -479,6 +487,7 @@ def _failed_case_result(
         finish_reason=None,
         retry_attempted=False,
         retry_failure_reason=None,
+        failure_category="PROVIDER_FAILURE",
         error=error_name,
     )
     metric_input = MetricInputs(
@@ -525,6 +534,9 @@ def _write_outputs(payload: EvaluationRunResult) -> None:
                 "workflow_completion_rate",
                 "benchmark_unexpected_tool_rate",
                 "unknown_or_disallowed_tool_rate",
+                "unknown_tool_call_rate",
+                "cases_with_unknown_tools_rate",
+                "unknown_or_disallowed_tools_per_case",
                 "policy_violation_attempt_rate",
                 "approval_classification_accuracy",
                 "rag_recall_at_k",
@@ -545,3 +557,11 @@ def _write_outputs(payload: EvaluationRunResult) -> None:
 
 def _estimate_tokens(request: str, tools: list[str]) -> int:
     return max(1, len(request.split()) + len(tools) * 24)
+
+
+def _is_provider_failure(stage: str) -> bool:
+    return stage in {
+        "provider_configuration",
+        "provider_request",
+        "provider_response",
+    } or stage.startswith("provider_")

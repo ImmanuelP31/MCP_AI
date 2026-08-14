@@ -221,7 +221,7 @@ and [docs/final-live-demo-runbook.md](docs/final-live-demo-runbook.md).
 
 ## Evaluation
 
-The deterministic benchmark currently contains 330 synthetic enterprise engineering scenarios. It reports tool recall/precision, workflow validity, hallucinated tool rate, RAG recall, approval classification, latency, and execution success across four configurations:
+The deterministic benchmark currently contains 330 synthetic enterprise engineering scenarios. It reports tool recall/precision, workflow validity, benchmark-unexpected tool selection, unknown/disallowed tool-call rate, RAG recall, approval classification, latency, and execution success across four configurations:
 
 - all tools
 - semantic retrieval
@@ -260,11 +260,11 @@ See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 | --- | --- |
 | MCP gateway and domain servers | Implemented and covered by tests |
 | GitHub failed-build vertical slice | Live validated against `ImmanuelP31/mcp-ai-demo-target` |
-| Gemini workflow planner | Implemented with compact schema-constrained planner decisions; 5-case Gemini smoke reached 5/5 valid workflows |
+| Gemini workflow planner | Implemented with compact schema-constrained planner decisions; latest 50-case Gemini run produced 27/30 valid workflows on provider-successful cases |
 | Gemini embeddings | Implemented for live semantic retrieval; hashing remains the deterministic baseline |
 | OpenSearch RAG adapter | Live validated locally for repository-document retrieval |
 | 330-case benchmark | Deterministic/mock regression baseline |
-| 50-case held-out adversarial benchmark | Rerun after compact-contract fix; final run was quota-limited by 33 Gemini HTTP 429 provider failures, with 0 planner-output/schema failures |
+| 50-case held-out adversarial benchmark | Rerun after compact-contract fix; latest run had 30/50 provider-successful responses, 90% provider-success workflow validity, 0 unknown/disallowed tool calls, and 20 Gemini HTTP 429 provider failures |
 | Enterprise SSO/OIDC | Not implemented; JWT boundary is present for integration |
 | Docker Compose | Local validation topology, not production deployment |
 

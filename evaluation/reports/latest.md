@@ -1,19 +1,38 @@
 # AI Engineering Workflow Evaluation Report
 
-Generated: `2026-08-11T14:39:36Z`
-Mode: `mock`
-Dataset: `C:\Users\Imman\OneDrive\Desktop\MCP PROJECT\evaluation\datasets\engineering_tasks.json`
+Generated: `2026-08-14T08:21:08Z`
+Mode: `real`
+Dataset: `C:\Users\Imman\OneDrive\Desktop\MCP PROJECT\evaluation\datasets\heldout_adversarial_engineering_tasks.json`
 
 These results are deterministic/mock when `mode=mock`. They should not be presented as live LLM quality measurements.
 
 ## Summary
 
-| Config | Cases | Tool Recall | Tool Precision | Validity | Hallucination | RAG Recall@K | Approval Accuracy | E2E Latency ms |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| all_tools | 330 | 0.5379 | 0.8409 | 0.6545 | 0.2226 | 0.0000 | 0.8091 | 149.29 |
-| semantic | 330 | 0.5015 | 0.8477 | 0.7455 | 0.2016 | 0.0000 | 0.8091 | 151.95 |
-| semantic_rag | 330 | 0.5879 | 0.8433 | 0.7455 | 0.2013 | 0.6955 | 0.8091 | 171.54 |
-| semantic_rag_graph | 330 | 0.5879 | 0.8433 | 0.7455 | 0.2013 | 0.6955 | 0.8091 | 167.42 |
+| Config | Attempted | Provider OK | Provider Success | Quality Validity | Tool Recall | Tool Precision | Unexpected Tools | Unknown Calls | Unknown Cases | E2E Validity |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| semantic_rag_graph | 50 | 30 | 0.6000 | 0.9000 | 0.3556 | 0.6906 | 0.4694 | 0.0000 | 0.0000 | 0.5400 |
+
+Quality metrics use provider-successful cases only. End-to-end metrics include provider availability failures.
+`Unexpected Tools` means the tool existed but was outside benchmark expected or acceptable tools. `Unknown Calls` means unknown/disallowed tool attempts divided by all generated tool attempts. `Unknown Cases` means provider-successful cases with at least one unknown/disallowed tool.
+
+## Failure Categories
+
+| Category | Cases |
+| --- | ---: |
+| PROVIDER_FAILURE | 20 |
+| WORKFLOW_VALIDATION_FAILURE | 3 |
+
+## Failure Taxonomy
+
+| Error Stage | Error Reason | Cases |
+| --- | --- | ---: |
+| provider_http | HTTP 429 | 20 |
+| workflow_validation | missing_dependency: Dependency node_0 does not exist.; invalid_condition: Condition source node_0 does not exist.; missing_edge_source: Edge source node_0 missing. | 1 |
+| workflow_validation | missing_dependency: Dependency node_0 does not exist.; missing_edge_source: Edge source node_0 missing. | 1 |
+| workflow_validation | missing_dependency: Dependency summarize_diff_node does not exist.; missing_edge_source: Edge source summarize_diff_node missing. | 1 |
+
+Retry attempts recorded: 0
+Provider finish reasons: none recorded
 
 ## Interpretation Guardrails
 
@@ -24,14 +43,4 @@ These results are deterministic/mock when `mode=mock`. They should not be presen
 
 ## Dataset Coverage
 
-- CI/CD: 30
-- build investigation: 30
-- deployment planning: 30
-- documentation lookup: 30
-- multi-tool workflows: 30
-- production approval: 30
-- repository inspection: 30
-- service ownership: 30
-- staging deployment: 30
-- test execution: 30
-- ticket creation: 30
+- heldout adversarial: 50

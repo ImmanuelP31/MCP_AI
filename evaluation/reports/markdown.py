@@ -20,10 +20,10 @@ def render_markdown_report(payload: Any) -> str:
         "",
         (
             "| Config | Attempted | Provider OK | Provider Success | Quality Validity | "
-            "Tool Recall | Tool Precision | Unexpected Tools | Unknown/Disallowed | "
-            "E2E Validity |"
+            "Tool Recall | Tool Precision | Unexpected Tools | Unknown Calls | "
+            "Unknown Cases | E2E Validity |"
         ),
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for summary in payload.summaries:
         lines.append(
@@ -34,7 +34,8 @@ def render_markdown_report(payload: Any) -> str:
             f"{_number(summary['tool_recall']):.4f} | "
             f"{_number(summary['tool_precision']):.4f} | "
             f"{_number(summary.get('benchmark_unexpected_tool_rate')):.4f} | "
-            f"{_number(summary.get('unknown_or_disallowed_tool_rate')):.4f} | "
+            f"{_number(summary.get('unknown_tool_call_rate')):.4f} | "
+            f"{_number(summary.get('cases_with_unknown_tools_rate')):.4f} | "
             f"{_number(summary.get('end_to_end_workflow_validity_rate')):.4f} |"
         )
     lines.extend(
@@ -46,11 +47,32 @@ def render_markdown_report(payload: Any) -> str:
             ),
             (
                 "`Unexpected Tools` means the tool existed but was outside benchmark expected or "
-                "acceptable tools. `Unknown/Disallowed` means an untrusted or undiscovered tool "
-                "was produced."
+                "acceptable tools. `Unknown Calls` means unknown/disallowed tool attempts divided "
+                "by all generated tool attempts. `Unknown Cases` means provider-successful cases "
+                "with at least one unknown/disallowed tool."
             ),
         ]
     )
+    category_counts: dict[str, int] = {}
+    for item in payload.cases:
+        category = item.get("failure_category")
+        if category:
+            category_counts[str(category)] = category_counts.get(str(category), 0) + 1
+    if category_counts:
+        lines.extend(
+            [
+                "",
+                "## Failure Categories",
+                "",
+                "| Category | Cases |",
+                "| --- | ---: |",
+            ]
+        )
+        for category, count in sorted(
+            category_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        ):
+            lines.append(f"| {category} | {count} |")
     failure_counts: dict[tuple[str, str], int] = {}
     for item in payload.cases:
         if item.get("workflow_valid"):

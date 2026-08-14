@@ -1,6 +1,6 @@
 # Live Gemini Held-Out Adversarial Benchmark
 
-Latest measured rerun: `2026-08-14T07:23:58Z`
+Latest measured rerun: `2026-08-14T08:21:08Z`
 
 ## Baseline Before Compact Planner Contract
 
@@ -135,30 +135,38 @@ Measured result:
 | Metric | Value |
 | --- | ---: |
 | Cases | 50 |
-| Tool recall | 0.2383 |
-| Tool precision | 0.9033 |
-| Exact tool-set accuracy | 0.1400 |
-| Workflow validity rate | 0.3400 |
-| Workflow completion rate | 0.2800 |
-| Hallucinated tool rate | 0.3077 |
-| Unnecessary tool-call rate | 0.1154 |
-| Policy violation attempt rate | 0.0200 |
-| Approval classification accuracy | 0.8200 |
-| RAG Recall@K | 0.1000 |
-| RAG MRR | 0.0300 |
-| Average workflow length | 0.52 |
-| Execution success rate | 0.2800 |
-| Average planner latency | 1023.9570 ms |
-| Average end-to-end latency | 1023.9589 ms |
-| Estimated model cost | 0.002530 USD |
+| Provider-successful cases | 30 |
+| Provider success rate | 0.6000 |
+| Quality workflow validity rate | 0.9000 |
+| End-to-end workflow validity rate | 0.5400 |
+| Tool recall | 0.3556 |
+| Tool precision | 0.6906 |
+| Exact tool-set accuracy | 0.1000 |
+| Workflow completion rate | 0.8000 |
+| Benchmark-unexpected tool rate | 0.4694 |
+| Unknown/disallowed tool-call rate | 0.0000 |
+| Cases with unknown/disallowed tools | 0.0000 |
+| Unnecessary tool-call rate | 0.1633 |
+| Policy violation attempt rate | 0.0333 |
+| Approval classification accuracy | 0.8333 |
+| RAG Recall@K | 0.2111 |
+| RAG MRR | 0.0944 |
+| Average workflow length | 1.6333 |
+| Execution success rate | 0.8000 |
+| End-to-end execution success rate | 0.4800 |
+| Average planner latency | 2470.9945 ms |
+| Average end-to-end latency | 2470.9986 ms |
+| Estimated model cost | 0.003130 USD |
 
 Failure distribution:
 
-- Provider HTTP `429`: 33 / 50
+- Provider HTTP `429`: 20 / 50
 - Planner-output/schema failures: 0 / 50
+- Workflow-validation failures: 3 / 50
 - Immediate provider retries: 0
 
 Interpretation: the original `45/50 PlannerOutputError` problem is no longer reproduced after the
-compact planner contract. The full-run validity number is currently dominated by Gemini provider
-quota/rate-limit failures, not malformed planner output. A higher-quota rerun is required before
-claiming final live model reliability.
+compact planner contract. Among the 30 provider-successful cases, 27 produced structurally valid
+workflows and no unknown/disallowed tools reached the final trusted workflow. The remaining
+end-to-end validity limit is now split between Gemini provider quota/rate-limit failures and
+semantic workflow quality, not malformed planner output.

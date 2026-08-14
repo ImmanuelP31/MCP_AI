@@ -15,7 +15,7 @@ Generated during the final presentation-readiness pass.
 | OpenSearch RAG backend | Live validated | Query returned `index_backend: opensearch` with the controlled failing workflow as top result. |
 | Gemini planner | Live validated | `LLM_PLANNER_PROVIDER=gemini` now uses a compact `PLAN`/`CLARIFY`/`REFUSE` contract compiled by trusted backend code. |
 | Gemini embeddings | Implemented | `EMBEDDING_PROVIDER=gemini` uses Gemini embeddings for tool discovery and engineering RAG. |
-| 30-50 live LLM benchmark | Rerun with caveat | 5-case smoke reached 5/5 valid workflows; 50-case rerun was quota-limited by 33 Gemini HTTP 429 provider failures. |
+| 30-50 live LLM benchmark | Rerun with caveat | 50-case rerun reached 30/50 provider-successful responses, 27/30 structurally valid workflows, and 0 unknown/disallowed tool calls; 20 cases were Gemini HTTP 429 provider failures. |
 | Hashing vs real embedding comparison | Ready to rerun | Hashing baseline is available; Gemini embedding mode is now the live provider path. |
 
 ## OpenSearch RAG Evidence
@@ -112,15 +112,24 @@ python -m evaluation.run --config semantic_rag_graph --mode real --dataset heldo
 Full-run result:
 
 - Cases: `50`
-- Workflow validity: `0.3400`
-- Tool precision: `0.9033`
-- Approval classification accuracy: `0.8200`
-- Provider HTTP `429`: `33 / 50`
+- Provider-successful cases: `30 / 50`
+- Provider success rate: `0.6000`
+- Quality workflow validity: `0.9000`
+- End-to-end workflow validity: `0.5400`
+- Tool recall: `0.3556`
+- Tool precision: `0.6906`
+- Benchmark-unexpected tool rate: `0.4694`
+- Unknown/disallowed tool-call rate: `0.0000`
+- Approval classification accuracy: `0.8333`
+- RAG Recall@K: `0.2111`
+- Provider HTTP `429`: `20 / 50`
 - Planner-output/schema failures: `0 / 50`
+- Workflow-validation failures: `3 / 50`
 
-Interpretation: the earlier `45 / 50 PlannerOutputError` failure mode is no longer reproduced, but
-the current full-run quality number is dominated by Gemini provider quota/rate limits. A higher-quota
-rerun is required before treating the 50-case result as final live model reliability.
+Interpretation: the earlier `45 / 50 PlannerOutputError` failure mode is no longer reproduced. On
+provider-successful cases, the compact contract now mostly produces structurally valid workflows.
+The remaining live benchmark gap is provider availability plus semantic quality, especially tool
+recall, benchmark-unexpected tool selection, and RAG recall.
 
 ## Optional Rerun With Gemini Embeddings
 

@@ -37,18 +37,20 @@ requests, distracting tools, policy conflicts, missing information, and multi-in
 
 ## Metrics
 
-Tracked metrics include tool recall, tool precision, exact tool-set accuracy, workflow validity, workflow completion, hallucinated tool rate, unnecessary tool calls, policy violation attempts, approval classification accuracy, RAG Recall@K, RAG MRR, workflow length, execution success, latency, token usage, and estimated cost when available.
+Tracked metrics include tool recall, tool precision, exact tool-set accuracy, workflow validity, workflow completion, benchmark-unexpected tool rate, unknown/disallowed tool-call rate, cases with unknown tools, unnecessary tool calls, policy violation attempts, approval classification accuracy, RAG Recall@K, RAG MRR, workflow length, execution success, latency, token usage, and estimated cost when available.
 
 ## Latest Measured Mock Baseline
 
-| Configuration | Cases | Tool Recall | Tool Precision | Workflow Validity | Hallucinated Tool Rate | RAG Recall@K | Execution Success |
+| Configuration | Cases | Tool Recall | Tool Precision | Workflow Validity | Unknown/Disallowed Tool Rate | RAG Recall@K | Execution Success |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | all_tools | 330 | 0.5379 | 0.8409 | 0.6545 | 0.2226 | 0.0000 | 0.5455 |
 | semantic | 330 | 0.5015 | 0.8477 | 0.7455 | 0.2016 | 0.0000 | 0.6364 |
 | semantic_rag | 330 | 0.5879 | 0.8433 | 0.7455 | 0.2013 | 0.6955 | 0.6364 |
 | semantic_rag_graph | 330 | 0.5879 | 0.8433 | 0.7455 | 0.2013 | 0.6955 | 0.6364 |
 
-These are mock-mode results from `evaluation/results/latest.json`, not live LLM claims.
+These are mock-mode baseline results retained for comparison, not live LLM claims. The tracked
+`evaluation/results/latest.json` file reflects the most recent evaluation run and may be either mock
+or live depending on the last command executed.
 
 ## Live Provider Status
 
@@ -62,13 +64,15 @@ The Gemini planner request includes a JSON response schema for the compact plann
 embedding-provider path supports Gemini embeddings for live retrieval benchmarks and deterministic
 hashing for CI.
 
-Evaluation records planner failure taxonomy fields including `error_stage`, `error_type`,
-`error_reason`, `attempts`, `finish_reason`, `retry_attempted`, and `retry_failure_reason`. This is
-intended to separate malformed JSON, schema validation, provider truncation, provider HTTP errors,
-workflow validation, invalid arguments, hallucinated tools, and no-action decisions.
+Evaluation records planner failure taxonomy fields including `failure_category`, `error_stage`,
+`error_type`, `error_reason`, `attempts`, `finish_reason`, `retry_attempted`, and
+`retry_failure_reason`. This separates provider failures, planner-output failures, workflow
+validation failures, execution failures, malformed JSON, schema validation, provider HTTP errors,
+invalid arguments, unknown/disallowed tools, and no-action decisions.
 
-Do not present provider-authentication or quota failures as model behavior. For a Gemini
-planner smoke, rerun:
+Do not present provider-authentication or quota failures as model behavior. Provider-quality metrics
+are computed over provider-successful cases only; end-to-end metrics include provider availability.
+For a Gemini planner smoke, rerun:
 
 ```powershell
 $env:LLM_PLANNER_PROVIDER="gemini"
@@ -121,6 +125,31 @@ For a real benchmark, configure a valid provider key, run the same dataset/confi
 mock mode, and label/report the provider, model, date, latency, token usage, and estimated cost.
 Provider errors such as HTTP 401 or quota/rate-limit responses are
 infrastructure/authentication failures and should not be presented as LLM quality metrics.
+
+## Latest Live Held-Out Measurement
+
+The latest 50-case held-out adversarial run was generated at `2026-08-14T08:21:08Z` with Gemini
+planning, hashing retrieval, and the `semantic_rag_graph` configuration.
+
+| Metric | Value |
+| --- | ---: |
+| Cases attempted | 50 |
+| Provider-successful cases | 30 |
+| Provider success rate | 0.6000 |
+| Provider-success workflow validity | 0.9000 |
+| End-to-end workflow validity | 0.5400 |
+| Tool recall | 0.3556 |
+| Tool precision | 0.6906 |
+| Benchmark-unexpected tool rate | 0.4694 |
+| Unknown/disallowed tool-call rate | 0.0000 |
+| Cases with unknown/disallowed tools | 0.0000 |
+| Approval classification accuracy | 0.8333 |
+| RAG Recall@K | 0.2111 |
+| Provider HTTP 429 failures | 20 |
+| Planner-output/schema failures | 0 |
+
+The earlier `45 / 50 PlannerOutputError` failure mode is no longer reproduced. Remaining work is
+semantic quality and provider availability rather than planner-output contract validity.
 
 ## Verified Live Integration Status
 

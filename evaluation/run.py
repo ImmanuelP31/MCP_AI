@@ -50,6 +50,7 @@ def main() -> None:
             "provider_success={provider_success_rate:.3f} "
             "quality_valid={workflow_validity_rate:.3f} "
             "unexpected_tools={benchmark_unexpected_tool_rate:.3f} "
+            "unknown_tool_calls={unknown_tool_call_rate:.3f} "
             "rag={rag_recall_at_k:.3f}"
         )
         print(

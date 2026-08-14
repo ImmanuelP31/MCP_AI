@@ -894,6 +894,9 @@ interface EvaluationSummary {
   hallucinated_tool_rate: number;
   benchmark_unexpected_tool_rate?: number;
   unknown_or_disallowed_tool_rate?: number;
+  unknown_tool_call_rate?: number;
+  cases_with_unknown_tools_rate?: number;
+  unknown_or_disallowed_tools_per_case?: number;
   unnecessary_tool_call_rate: number;
   policy_violation_attempt_rate: number;
   approval_classification_accuracy: number;
@@ -1650,7 +1653,9 @@ function EvaluationPage() {
   const latest = payload.summaries[payload.summaries.length - 1];
   const unexpectedToolRate =
     latest.benchmark_unexpected_tool_rate ?? latest.hallucinated_tool_rate;
-  const unknownToolRate = latest.unknown_or_disallowed_tool_rate ?? 0;
+  const unknownToolCallRate =
+    latest.unknown_tool_call_rate ?? latest.unknown_or_disallowed_tool_rate ?? 0;
+  const unknownToolCaseRate = latest.cases_with_unknown_tools_rate ?? 0;
   const providerSuccessRate = latest.provider_success_rate ?? 1;
   const providerSuccessfulCases = latest.provider_successful_cases ?? latest.cases;
   const endToEndValidity =
@@ -1670,7 +1675,8 @@ function EvaluationPage() {
             <MetricTile label="Quality validity" value={formatScore(latest.workflow_validity_rate)} icon={Check} accent="success" />
             <MetricTile label="E2E validity" value={formatScore(endToEndValidity)} icon={Gauge} accent="neutral" />
             <MetricTile label="Unexpected tools" value={formatScore(unexpectedToolRate)} icon={AlertTriangle} accent="warning" />
-            <MetricTile label="Unknown tools" value={formatScore(unknownToolRate)} icon={ShieldCheck} accent="danger" />
+            <MetricTile label="Unknown calls" value={formatScore(unknownToolCallRate)} icon={ShieldCheck} accent="danger" />
+            <MetricTile label="Unknown cases" value={formatScore(unknownToolCaseRate)} icon={ShieldCheck} accent="danger" />
             <MetricTile label="Tool recall" value={formatScore(latest.tool_recall)} icon={Wrench} accent="neutral" />
             <MetricTile label="Tool precision" value={formatScore(latest.tool_precision)} icon={ClipboardCheck} accent="neutral" />
             <MetricTile label="RAG Recall@K" value={formatScore(latest.rag_recall_at_k)} icon={BookOpen} accent="success" />
@@ -1687,7 +1693,8 @@ function EvaluationPage() {
                   <th>Completion</th>
                   <th>Tool F1 inputs</th>
                   <th>Unexpected</th>
-                  <th>Unknown</th>
+                  <th>Unknown calls</th>
+                  <th>Unknown cases</th>
                   <th>RAG</th>
                   <th>Policy</th>
                   <th>Latency</th>
@@ -1708,7 +1715,12 @@ function EvaluationPage() {
                     <td>
                       {formatScore(summary.benchmark_unexpected_tool_rate ?? summary.hallucinated_tool_rate)}
                     </td>
-                    <td>{formatScore(summary.unknown_or_disallowed_tool_rate ?? 0)}</td>
+                    <td>
+                      {formatScore(
+                        summary.unknown_tool_call_rate ?? summary.unknown_or_disallowed_tool_rate ?? 0,
+                      )}
+                    </td>
+                    <td>{formatScore(summary.cases_with_unknown_tools_rate ?? 0)}</td>
                     <td>
                       {formatScore(summary.rag_recall_at_k)} / {formatScore(summary.rag_mrr)}
                     </td>
