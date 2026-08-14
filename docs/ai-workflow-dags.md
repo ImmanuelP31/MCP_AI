@@ -67,10 +67,29 @@ LLM_PLANNER_PROVIDER=gemini
 OpenRouter remains supported for planner comparison by setting `OPENROUTER_API_KEY` and
 `LLM_PLANNER_PROVIDER=openrouter`.
 
-`LLMWorkflowPlanner` calls the provider for JSON only, then normalizes common response shapes
-(`nodes`, `steps`, or `tool_sequence`) into the strict `WorkflowPlanDraft` schema. That normalized
-draft is still untrusted. The backend validator then checks tool existence, discovered-tool
-membership, arguments, DAG structure, size limits, RBAC, risk, and approval policy.
+`LLMWorkflowPlanner` asks live providers for a compact `PlannerDecision`, not the final trusted
+workflow object. The model can only return:
+
+- `decision`: `PLAN`, `CLARIFY`, or `REFUSE`
+- `confidence`
+- `reason`
+- `missing_context`
+- node proposals containing `id`, `tool_name`, `arguments`, `depends_on`, typed `condition`, and
+  optional `knowledge_references`
+
+The model does not generate `tool_server`, `description`, `risk_level`, `approval_required`,
+`planner_model`, retry policy, timeout, compensation, or workflow identifiers. It also does not
+generate edges; the backend derives edges from `depends_on`.
+
+For Gemini, the request includes a JSON response schema for `PlannerDecision` in addition to JSON
+MIME mode. The resulting proposal is compiled by trusted backend code into `WorkflowPlanDraft` using
+the MCP tool registry. That draft is still untrusted. The backend validator then checks tool
+existence, discovered-tool membership, arguments, DAG structure, size limits, RBAC, risk, and
+approval policy.
+
+`CLARIFY` and `REFUSE` are valid no-action planner decisions. They are persisted as zero-node
+workflow records with the reason and missing context in `original_plan`, instead of being counted as
+malformed planner output.
 
 Live planner configuration fails closed in production and real-evaluation mode. If
 `LLM_PLANNER_PROVIDER=gemini` is requested without a valid `GEMINI_API_KEY`, planning raises a

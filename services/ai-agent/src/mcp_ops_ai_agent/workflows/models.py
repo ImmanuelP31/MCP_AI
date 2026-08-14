@@ -62,6 +62,12 @@ class ConditionOperator(StrEnum):
     EXISTS = "exists"
 
 
+class PlannerDecisionType(StrEnum):
+    PLAN = "PLAN"
+    CLARIFY = "CLARIFY"
+    REFUSE = "REFUSE"
+
+
 class WorkflowPolicyEvaluation(StrictModel):
     actor: str = Field(min_length=1, max_length=160)
     role: str = Field(min_length=1, max_length=64)
@@ -175,8 +181,11 @@ class WorkflowPlanDraft(StrictModel):
     user_request: str = Field(min_length=2, max_length=2000)
     planner_model: str = Field(min_length=1, max_length=120)
     confidence: float = Field(ge=0.0, le=1.0)
-    nodes: list[WorkflowNode] = Field(min_length=1, max_length=25)
+    nodes: list[WorkflowNode] = Field(default_factory=list, max_length=25)
     edges: list[WorkflowEdge] = Field(default_factory=list, max_length=50)
+    planner_decision: PlannerDecisionType = PlannerDecisionType.PLAN
+    reason: str | None = Field(default=None, max_length=500)
+    missing_context: list[str] = Field(default_factory=list, max_length=10)
 
 
 class WorkflowValidationIssue(StrictModel):

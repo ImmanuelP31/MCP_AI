@@ -53,9 +53,19 @@ These are mock-mode results from `evaluation/results/latest.json`, not live LLM 
 ## Live Provider Status
 
 The live planner path is implemented behind the same typed workflow schema used by deterministic
-mode. The recommended live provider is Gemini, with OpenRouter available for planner-only
-comparison. The embedding-provider path now supports Gemini embeddings for live retrieval
-benchmarks and deterministic hashing for CI.
+mode. Live LLMs now return a compact `PlannerDecision` proposal (`PLAN`, `CLARIFY`, or `REFUSE`)
+that trusted backend code compiles into the full workflow DAG. This keeps registry metadata,
+risk, approval requirements, edges, retry policy, and execution settings outside model authority.
+
+The recommended live provider is Gemini, with OpenRouter available for planner-only comparison.
+The Gemini planner request includes a JSON response schema for the compact planner decision. The
+embedding-provider path supports Gemini embeddings for live retrieval benchmarks and deterministic
+hashing for CI.
+
+Evaluation records planner failure taxonomy fields including `error_stage`, `error_type`,
+`error_reason`, `attempts`, `finish_reason`, `retry_attempted`, and `retry_failure_reason`. This is
+intended to separate malformed JSON, schema validation, provider truncation, provider HTTP errors,
+workflow validation, invalid arguments, hallucinated tools, and no-action decisions.
 
 Do not present provider-authentication or quota failures as model behavior. For a Gemini
 planner smoke, rerun:

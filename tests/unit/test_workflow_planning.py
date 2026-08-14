@@ -5,7 +5,12 @@ from typing import Any
 
 import pytest
 from mcp_ops_ai_agent.workflows.arguments import resolve_node_arguments
-from mcp_ops_ai_agent.workflows.models import WorkflowNode, WorkflowPlanDraft, WorkflowPlanRequest
+from mcp_ops_ai_agent.workflows.models import (
+    PlannerDecisionType,
+    WorkflowNode,
+    WorkflowPlanDraft,
+    WorkflowPlanRequest,
+)
 from mcp_ops_ai_agent.workflows.planner import (
     JsonWorkflowPlanner,
     LLMWorkflowPlanner,
@@ -256,6 +261,146 @@ def test_llm_workflow_planner_returns_typed_schema_from_authorized_tool_subset()
     assert draft.nodes[0].tool_name == "get_build_status"
     assert client.calls
     assert "allowed_tools" in client.calls[0]["user_payload"]
+
+
+def test_llm_workflow_planner_compiles_minimal_planner_decision() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Get failed jobs and then retrieve logs for the failed job.",
+        role="ENGINEER",
+        top_k=20,
+    )
+    payload = {
+        "decision": "PLAN",
+        "confidence": 0.81,
+        "reason": "Inspect failed jobs before fetching logs.",
+        "missing_context": [],
+        "nodes": [
+            {
+                "id": "failed_jobs",
+                "tool_name": "get_failed_jobs",
+                "arguments": {"repository": "ImmanuelP31/MCP_AI", "run_id": 481},
+            },
+            {
+                "id": "logs",
+                "tool_name": "get_pipeline_logs",
+                "depends_on": ["failed_jobs"],
+                "arguments": {
+                    "repository": "ImmanuelP31/MCP_AI",
+                    "job_id": {"$from": "failed_jobs.jobs.0.id"},
+                },
+            },
+        ],
+    }
+    client = FakeWorkflowPlanClient([json.dumps(payload)])
+
+    draft = LLMWorkflowPlanner(client, model_name="test-model").plan(
+        "Get failed jobs and then retrieve logs for the failed job.",
+        tools,
+        role="ENGINEER",
+    )
+
+    assert draft.planner_decision == PlannerDecisionType.PLAN
+    assert [node.tool_name for node in draft.nodes] == ["get_failed_jobs", "get_pipeline_logs"]
+    assert draft.nodes[1].tool_server == "cicd-mcp"
+    assert draft.nodes[1].argument_references[0].output_path == "data.jobs.0.id"
+    assert [(edge.source, edge.destination) for edge in draft.edges] == [("failed_jobs", "logs")]
+    assert "risk_level_hint" not in client.calls[0]["user_payload"]["allowed_tools"][0]
+    assert "approval_required_hint" not in client.calls[0]["user_payload"]["allowed_tools"][0]
+
+
+def test_llm_workflow_planner_supports_clarify_and_refuse_decisions() -> None:
+    service = WorkflowPlanningService()
+
+    clarify = WorkflowPlanningService(
+        planner=LLMWorkflowPlanner(
+            FakeWorkflowPlanClient(
+                [
+                    json.dumps(
+                        {
+                            "decision": "CLARIFY",
+                            "confidence": 0.98,
+                            "reason": "Repository is required to inspect the workflow.",
+                            "missing_context": ["repository"],
+                            "nodes": [],
+                        }
+                    )
+                ]
+            ),
+            model_name="test-model",
+        ),
+        discovery=service.discovery,
+    ).plan(
+        WorkflowPlanRequest(
+            user_request="A workflow failed, but I forgot which repository.",
+            role="ENGINEER",
+            created_by="engineer",
+        )
+    )
+    assert clarify.ok is True
+    assert clarify.workflow.nodes == []
+    assert clarify.workflow.original_plan["planner_decision"] == "CLARIFY"
+    assert clarify.workflow.original_plan["missing_context"] == ["repository"]
+
+    refused = WorkflowPlanningService(
+        planner=LLMWorkflowPlanner(
+            FakeWorkflowPlanClient(
+                [
+                    json.dumps(
+                        {
+                            "decision": "REFUSE",
+                            "confidence": 0.99,
+                            "reason": "Arbitrary SQL is outside governed MCP tools.",
+                            "missing_context": [],
+                            "nodes": [],
+                        }
+                    )
+                ]
+            ),
+            model_name="test-model",
+        ),
+        discovery=service.discovery,
+    ).plan(
+        WorkflowPlanRequest(
+            user_request="Run arbitrary SQL against the workflow database.",
+            role="ENGINEER",
+            created_by="engineer",
+        )
+    )
+    assert refused.ok is True
+    assert refused.workflow.nodes == []
+    assert refused.workflow.original_plan["planner_decision"] == "REFUSE"
+
+
+def test_planner_decision_rejects_model_supplied_authorization_fields() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Restart SIM-014 service.",
+        role="OPERATOR",
+        top_k=10,
+    )
+    payload = {
+        "decision": "PLAN",
+        "confidence": 0.8,
+        "nodes": [
+            {
+                "id": "restart",
+                "tool_name": "restart_service",
+                "arguments": {"device_id": "SIM-014"},
+                "approval_required": False,
+            }
+        ],
+    }
+
+    with pytest.raises(PlannerOutputError) as exc_info:
+        LLMWorkflowPlanner(
+            FakeWorkflowPlanClient([json.dumps(payload)]),
+            model_name="test",
+            retry_with_feedback=False,
+        ).plan("Restart SIM-014 service.", tools, role="OPERATOR")
+
+    assert exc_info.value.stage == "schema_validation"
+    assert "approval_required" in exc_info.value.reason
 
 
 def test_llm_workflow_planner_fills_trusted_tool_metadata_and_arguments() -> None:

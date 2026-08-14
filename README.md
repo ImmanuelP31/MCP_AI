@@ -73,8 +73,8 @@ flowchart LR
 
 - **Governed MCP execution**: tool registry, permissions, risk classes, rate limits, idempotency,
   audit logging, and approval routing.
-- **Gemini-backed AI planning**: live workflow planning, answer generation, and embeddings through
-  provider abstractions, with deterministic fallback for CI.
+- **Gemini-backed AI planning**: live providers return compact `PLAN`/`CLARIFY`/`REFUSE`
+  proposals that trusted backend code compiles into governed workflow DAGs.
 - **Semantic MCP tool discovery**: the planner receives only relevant, role-authorized tools instead
   of the entire tool catalog.
 - **Engineering RAG**: repository docs, CI/CD docs, deployment policies, service ownership, and MCP
@@ -94,7 +94,13 @@ flowchart LR
 
 ## AI And MCP Model
 
-The LLM is deliberately not an authority. It receives a policy-filtered tool subset from semantic discovery and cited engineering evidence from RAG, then proposes a typed workflow. The backend validates every node, checks every tool against trusted registry metadata, evaluates RBAC and environment policy, inserts approval gates where required, and revalidates immediately before execution.
+The LLM is deliberately not an authority. It receives a policy-filtered tool subset from semantic discovery and cited engineering evidence from RAG, then proposes a compact planner decision. For live Gemini planning, this decision is schema-constrained JSON with only `decision`, `confidence`, `reason`, `missing_context`, and node proposals.
+
+The trusted backend compiles that proposal into the full workflow DAG. It supplies server metadata,
+risk, approval requirements, retry policy, timeouts, and DAG edges from the MCP registry and
+workflow compiler. It then validates every node, checks every tool against trusted registry
+metadata, evaluates RBAC and environment policy, inserts approval gates where required, and
+revalidates immediately before execution.
 
 Trust boundary:
 
@@ -254,11 +260,11 @@ See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 | --- | --- |
 | MCP gateway and domain servers | Implemented and covered by tests |
 | GitHub failed-build vertical slice | Live validated against `ImmanuelP31/mcp-ai-demo-target` |
-| Gemini workflow planner | Implemented; live 50-case held-out evaluation completed and labeled |
+| Gemini workflow planner | Implemented with compact schema-constrained planner decisions; live 50-case held-out evaluation completed and labeled |
 | Gemini embeddings | Implemented for live semantic retrieval; hashing remains the deterministic baseline |
 | OpenSearch RAG adapter | Live validated locally for repository-document retrieval |
 | 330-case benchmark | Deterministic/mock regression baseline |
-| 50-case held-out adversarial benchmark | Live Gemini planner run completed: 5/50 valid workflows; failure taxonomy instrumentation added |
+| 50-case held-out adversarial benchmark | Live Gemini planner run completed before compact-contract fix: 5/50 valid workflows; failure taxonomy and compact planner contract added for re-evaluation |
 | Enterprise SSO/OIDC | Not implemented; JWT boundary is present for integration |
 | Docker Compose | Local validation topology, not production deployment |
 

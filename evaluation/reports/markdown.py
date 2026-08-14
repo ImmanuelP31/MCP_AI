@@ -57,6 +57,22 @@ def render_markdown_report(payload: Any) -> str:
             key=lambda item: (-item[1], item[0][0], item[0][1]),
         )[:12]:
             lines.append(f"| {stage} | {_escape(reason[:180])} | {count} |")
+        retry_cases = sum(1 for item in payload.cases if item.get("retry_attempted"))
+        finish_reasons = sorted(
+            {
+                str(item.get("finish_reason"))
+                for item in payload.cases
+                if item.get("finish_reason")
+            }
+        )
+        lines.extend(
+            [
+                "",
+                f"Retry attempts recorded: {retry_cases}",
+                "Provider finish reasons: "
+                f"{', '.join(finish_reasons) if finish_reasons else 'none recorded'}",
+            ]
+        )
     lines.extend(
         [
             "",

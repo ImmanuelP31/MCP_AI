@@ -63,6 +63,8 @@ class EvaluationCaseResult:
     error_stage: str | None = None
     error_type: str | None = None
     error_reason: str | None = None
+    attempts: int = 1
+    finish_reason: str | None = None
     retry_attempted: bool = False
     retry_failure_reason: str | None = None
     error: str | None = None
@@ -316,6 +318,8 @@ def _evaluate_case(
     error_stage: str | None = None
     error_type: str | None = None
     error_reason: str | None = None
+    attempts = 1
+    finish_reason: str | None = None
     retry_attempted = False
     retry_failure_reason: str | None = None
     planner_started = time.perf_counter()
@@ -356,6 +360,8 @@ def _evaluate_case(
         error_stage = exc.stage
         error_type = exc.__class__.__name__
         error_reason = exc.reason
+        attempts = exc.attempt
+        finish_reason = exc.finish_reason
         retry_attempted = exc.retry_attempted
         retry_failure_reason = exc.retry_failure_reason
     except Exception as exc:  # noqa: BLE001 - evaluation records failures as data
@@ -397,6 +403,8 @@ def _evaluate_case(
         error_stage=error_stage,
         error_type=error_type,
         error_reason=error_reason,
+        attempts=attempts,
+        finish_reason=finish_reason,
         retry_attempted=retry_attempted,
         retry_failure_reason=retry_failure_reason,
         error=error,
@@ -457,6 +465,8 @@ def _failed_case_result(
         error_stage="runtime_setup",
         error_type=error_name,
         error_reason=error_reason,
+        attempts=1,
+        finish_reason=None,
         retry_attempted=False,
         retry_failure_reason=None,
         error=error_name,
