@@ -343,7 +343,10 @@ class LLMWorkflowPlanner:
                 attempt=1,
             )
         except PlannerOutputError as first_error:
-            if not self.retry_with_feedback:
+            if not self.retry_with_feedback or first_error.stage not in {
+                "json_parse",
+                "schema_validation",
+            }:
                 raise
             retry_payload = {
                 **payload,
@@ -842,7 +845,34 @@ def _arguments_for(tool: ToolDocument, user_request: str) -> dict[str, object]:
             "team": "Engineering Operations",
             "diagnostic_evidence": {"source": "workflow_planner"},
         }
-    return {"query": user_request[:500]}
+    schema_defaults = _schema_default_arguments(tool, user_request)
+    if schema_defaults:
+        return schema_defaults
+    return {}
+
+
+def _schema_default_arguments(tool: ToolDocument, user_request: str) -> dict[str, object]:
+    properties = tool.input_schema.get("properties", {})
+    if not isinstance(properties, dict):
+        return {}
+    arguments: dict[str, object] = {}
+    if "device_id" in properties:
+        arguments["device_id"] = "SIM-014"
+    if "repository" in properties:
+        arguments["repository"] = "ImmanuelP31/MCP_AI"
+    if "query" in properties:
+        arguments["query"] = user_request[:500]
+    required = tool.input_schema.get("required", [])
+    if isinstance(required, list):
+        for field_name in required:
+            if not isinstance(field_name, str) or field_name == "actor_role":
+                continue
+            if field_name in arguments:
+                continue
+            placeholder = _placeholder_for_field(field_name, properties.get(field_name))
+            if placeholder is not None:
+                arguments[field_name] = placeholder
+    return arguments
 
 
 _REFERENCE_PATTERN = re.compile(
@@ -1154,9 +1184,14 @@ def _planner_system_prompt() -> str:
         "schema: {decision, confidence, reason, missing_context, nodes}. decision must be PLAN, "
         "CLARIFY, or REFUSE. Use PLAN only when a safe workflow can be proposed from "
         "allowed_tools. "
-        "Use CLARIFY when required context such as repository, environment, build, service, or "
-        "owner is missing. Use REFUSE for arbitrary SQL, shell commands, policy bypass, secrets, "
-        "or requests outside governed MCP tools. Nodes may contain only id, tool_name, arguments, "
+        "Use CLARIFY only when required context cannot be inferred from the request, retrieved "
+        "knowledge, allowed tool schemas, or configured current repository. Do not clarify merely "
+        "because an input schema has an optional field or because a request says "
+        "latest/current/this repository. Use REFUSE only for arbitrary SQL, shell commands, "
+        "credential or secret access, policy-bypass requests, or requests outside governed MCP "
+        "tools. Do not refuse high-risk or "
+        "production actions when an allowed MCP tool exists; propose the workflow and let backend "
+        "policy require approval or deny it. Nodes may contain only id, tool_name, arguments, "
         "depends_on, condition, and knowledge_references. Do not output tool_server, description, "
         "risk_level, approval_required, planner_model, workflow_id, retry settings, timeouts, or "
         "compensation tools; the trusted backend supplies those. Do not output edges; dependencies "
@@ -1181,6 +1216,13 @@ def _planner_payload(
             "user_request": user_request[:2000],
             "role": role,
             "required_output_schema": "PlannerDecision",
+            "current_repository": "ImmanuelP31/MCP_AI",
+            "default_environment": "dev",
+            "semantic_rules": [
+                "latest/current/this repository may use current_repository",
+                "high-risk governed actions should be PLAN, not REFUSE",
+                "approval is not a model decision; backend policy handles it",
+            ],
         },
         "allowed_tools": [
             {

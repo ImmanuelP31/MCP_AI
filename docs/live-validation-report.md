@@ -13,9 +13,9 @@ Generated during the final presentation-readiness pass.
 | GitHub vertical-slice demo | Live validated | Failed build investigation, issue creation, approval-gated rerun request, approval, and rerun execution succeeded against the demo target. |
 | Repository-document RAG | Live validated | 34 bounded repository docs/workflows ingested. |
 | OpenSearch RAG backend | Live validated | Query returned `index_backend: opensearch` with the controlled failing workflow as top result. |
-| Gemini planner | Implemented | `LLM_PLANNER_PROVIDER=gemini` uses the same typed workflow schema and backend validation path. |
+| Gemini planner | Live validated | `LLM_PLANNER_PROVIDER=gemini` now uses a compact `PLAN`/`CLARIFY`/`REFUSE` contract compiled by trusted backend code. |
 | Gemini embeddings | Implemented | `EMBEDDING_PROVIDER=gemini` uses Gemini embeddings for tool discovery and engineering RAG. |
-| 30-50 live LLM benchmark | Pending rerun | Requires explicit approval to send benchmark/tool context to the configured external provider. |
+| 30-50 live LLM benchmark | Rerun with caveat | 5-case smoke reached 5/5 valid workflows; 50-case rerun was quota-limited by 33 Gemini HTTP 429 provider failures. |
 | Hashing vs real embedding comparison | Ready to rerun | Hashing baseline is available; Gemini embedding mode is now the live provider path. |
 
 ## OpenSearch RAG Evidence
@@ -80,7 +80,49 @@ The provider message was: no credits remaining. This is a billing/quota conditio
 invalid-key authentication failure. The benchmark runner correctly records provider failures
 instead of fabricating successful model metrics.
 
-## Required Rerun With Gemini
+## Latest Gemini Held-Out Benchmark
+
+The compact planner contract and prompt semantics were rerun against the held-out adversarial set
+with Gemini planning and hashing retrieval to isolate planner behavior from embedding quota.
+
+Smoke command:
+
+```powershell
+$env:LLM_PLANNER_PROVIDER="gemini"
+$env:GEMINI_MODEL="gemini-3.5-flash-lite"
+$env:EMBEDDING_PROVIDER="hashing"
+python -m evaluation.run --config semantic_rag_graph --mode real --dataset heldout_adversarial --limit 5
+```
+
+Smoke result:
+
+- Cases: `5`
+- Workflow validity: `1.0000`
+- Planner-output/schema failures: `0`
+
+Full-run command:
+
+```powershell
+$env:LLM_PLANNER_PROVIDER="gemini"
+$env:GEMINI_MODEL="gemini-3.5-flash-lite"
+$env:EMBEDDING_PROVIDER="hashing"
+python -m evaluation.run --config semantic_rag_graph --mode real --dataset heldout_adversarial --limit 50
+```
+
+Full-run result:
+
+- Cases: `50`
+- Workflow validity: `0.3400`
+- Tool precision: `0.9033`
+- Approval classification accuracy: `0.8200`
+- Provider HTTP `429`: `33 / 50`
+- Planner-output/schema failures: `0 / 50`
+
+Interpretation: the earlier `45 / 50 PlannerOutputError` failure mode is no longer reproduced, but
+the current full-run quality number is dominated by Gemini provider quota/rate limits. A higher-quota
+rerun is required before treating the 50-case result as final live model reliability.
+
+## Optional Rerun With Gemini Embeddings
 
 After setting a valid Gemini key and approving external provider use:
 

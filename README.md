@@ -260,11 +260,11 @@ See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 | --- | --- |
 | MCP gateway and domain servers | Implemented and covered by tests |
 | GitHub failed-build vertical slice | Live validated against `ImmanuelP31/mcp-ai-demo-target` |
-| Gemini workflow planner | Implemented with compact schema-constrained planner decisions; live 50-case held-out evaluation completed and labeled |
+| Gemini workflow planner | Implemented with compact schema-constrained planner decisions; 5-case Gemini smoke reached 5/5 valid workflows |
 | Gemini embeddings | Implemented for live semantic retrieval; hashing remains the deterministic baseline |
 | OpenSearch RAG adapter | Live validated locally for repository-document retrieval |
 | 330-case benchmark | Deterministic/mock regression baseline |
-| 50-case held-out adversarial benchmark | Live Gemini planner run completed before compact-contract fix: 5/50 valid workflows; failure taxonomy and compact planner contract added for re-evaluation |
+| 50-case held-out adversarial benchmark | Rerun after compact-contract fix; final run was quota-limited by 33 Gemini HTTP 429 provider failures, with 0 planner-output/schema failures |
 | Enterprise SSO/OIDC | Not implemented; JWT boundary is present for integration |
 | Docker Compose | Local validation topology, not production deployment |
 
