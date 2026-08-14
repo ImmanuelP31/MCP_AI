@@ -117,3 +117,57 @@ def test_summary_metrics_capture_policy_approval_rag_and_latency() -> None:
     assert summary.policy_violation_attempt_rate == 0.5
     assert summary.rag_mrr == 0.25
     assert summary.planner_latency_ms == 20.0
+
+
+def test_summary_metrics_separate_provider_availability_from_planner_quality() -> None:
+    summary = compute_summary(
+        config="semantic_rag_graph",
+        mode="real",
+        inputs=[
+            MetricInputs(
+                expected_tools=["get_build_status"],
+                acceptable_tools=[],
+                actual_tools=["get_build_status"],
+                prohibited_tools=[],
+                required_approvals=[],
+                actual_approvals=[],
+                relevant_documents=[],
+                retrieved_documents=[],
+                workflow_valid=True,
+                workflow_completed=True,
+                execution_succeeded=True,
+                planner_latency_ms=10.0,
+                end_to_end_latency_ms=12.0,
+                token_usage=10,
+                estimated_cost_usd=0.01,
+                provider_success=True,
+            ),
+            MetricInputs(
+                expected_tools=["run_tests"],
+                acceptable_tools=[],
+                actual_tools=[],
+                prohibited_tools=[],
+                required_approvals=["deploy_staging"],
+                actual_approvals=[],
+                relevant_documents=[],
+                retrieved_documents=[],
+                workflow_valid=False,
+                workflow_completed=False,
+                execution_succeeded=False,
+                planner_latency_ms=0.0,
+                end_to_end_latency_ms=0.0,
+                token_usage=0,
+                estimated_cost_usd=None,
+                provider_success=False,
+            ),
+        ],
+    )
+
+    assert summary.cases == 2
+    assert summary.provider_successful_cases == 1
+    assert summary.provider_failed_cases == 1
+    assert summary.provider_success_rate == 0.5
+    assert summary.tool_precision == 1.0
+    assert summary.approval_classification_accuracy == 1.0
+    assert summary.workflow_validity_rate == 1.0
+    assert summary.end_to_end_workflow_validity_rate == 0.5

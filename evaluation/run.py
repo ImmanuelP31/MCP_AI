@@ -45,11 +45,15 @@ def main() -> None:
         dataset_name=args.dataset,
     )
     for summary in result.summaries:
+        message = (
+            "{config}: cases={cases} provider_ok={provider_successful_cases} "
+            "provider_success={provider_success_rate:.3f} "
+            "quality_valid={workflow_validity_rate:.3f} "
+            "unexpected_tools={benchmark_unexpected_tool_rate:.3f} "
+            "rag={rag_recall_at_k:.3f}"
+        )
         print(
-            "{config}: cases={cases} valid={workflow_validity_rate:.3f} "
-            "hallucination={hallucinated_tool_rate:.3f} rag={rag_recall_at_k:.3f}".format(
-                **summary
-            )
+            message.format(**summary)
         )
 
 

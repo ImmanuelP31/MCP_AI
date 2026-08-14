@@ -322,6 +322,8 @@ def _evaluate_case(
     finish_reason: str | None = None
     retry_attempted = False
     retry_failure_reason: str | None = None
+    provider_success = True
+    unknown_or_disallowed_tools = 0
     planner_started = time.perf_counter()
     try:
         result = runtime.service.plan(
@@ -355,6 +357,11 @@ def _evaluate_case(
         error_reason = "; ".join(
             f"{issue.code}: {issue.message}" for issue in exc.issues[:3]
         )
+        unknown_or_disallowed_tools = sum(
+            1
+            for issue in exc.issues
+            if issue.code in {"unknown_tool", "tool_not_discovered"}
+        )
     except PlannerOutputError as exc:
         error = exc.__class__.__name__
         error_stage = exc.stage
@@ -364,6 +371,7 @@ def _evaluate_case(
         finish_reason = exc.finish_reason
         retry_attempted = exc.retry_attempted
         retry_failure_reason = exc.retry_failure_reason
+        provider_success = not exc.stage.startswith("provider_")
     except Exception as exc:  # noqa: BLE001 - evaluation records failures as data
         error = exc.__class__.__name__
         error_stage = "runtime"
@@ -425,6 +433,8 @@ def _evaluate_case(
         end_to_end_latency_ms=e2e_latency_ms,
         token_usage=token_usage,
         estimated_cost_usd=cost,
+        provider_success=provider_success,
+        unknown_or_disallowed_tools=unknown_or_disallowed_tools,
     )
     return case_result, metric_input
 
@@ -487,6 +497,8 @@ def _failed_case_result(
         end_to_end_latency_ms=0.0,
         token_usage=0,
         estimated_cost_usd=None,
+        provider_success=False,
+        unknown_or_disallowed_tools=0,
     )
     return case_result, metric_input
 
@@ -503,17 +515,23 @@ def _write_outputs(payload: EvaluationRunResult) -> None:
             fieldnames=[
                 "config",
                 "cases",
+                "provider_successful_cases",
+                "provider_failed_cases",
+                "provider_success_rate",
                 "tool_recall",
                 "tool_precision",
                 "exact_tool_set_accuracy",
                 "workflow_validity_rate",
                 "workflow_completion_rate",
-                "hallucinated_tool_rate",
+                "benchmark_unexpected_tool_rate",
+                "unknown_or_disallowed_tool_rate",
                 "policy_violation_attempt_rate",
                 "approval_classification_accuracy",
                 "rag_recall_at_k",
                 "rag_mrr",
                 "average_workflow_length",
+                "end_to_end_workflow_validity_rate",
+                "end_to_end_execution_success_rate",
                 "planner_latency_ms",
                 "end_to_end_latency_ms",
                 "mode",

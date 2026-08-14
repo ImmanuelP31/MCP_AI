@@ -883,12 +883,17 @@ interface EvaluationSummary {
   config: string;
   mode: string;
   cases: number;
+  provider_successful_cases?: number;
+  provider_failed_cases?: number;
+  provider_success_rate?: number;
   tool_recall: number;
   tool_precision: number;
   exact_tool_set_accuracy: number;
   workflow_validity_rate: number;
   workflow_completion_rate: number;
   hallucinated_tool_rate: number;
+  benchmark_unexpected_tool_rate?: number;
+  unknown_or_disallowed_tool_rate?: number;
   unnecessary_tool_call_rate: number;
   policy_violation_attempt_rate: number;
   approval_classification_accuracy: number;
@@ -896,6 +901,8 @@ interface EvaluationSummary {
   rag_mrr: number;
   average_workflow_length: number;
   execution_success_rate: number;
+  end_to_end_workflow_validity_rate?: number;
+  end_to_end_execution_success_rate?: number;
   planner_latency_ms: number;
   end_to_end_latency_ms: number;
   token_usage: number;
@@ -1641,6 +1648,13 @@ function EvaluationPage() {
     );
   }
   const latest = payload.summaries[payload.summaries.length - 1];
+  const unexpectedToolRate =
+    latest.benchmark_unexpected_tool_rate ?? latest.hallucinated_tool_rate;
+  const unknownToolRate = latest.unknown_or_disallowed_tool_rate ?? 0;
+  const providerSuccessRate = latest.provider_success_rate ?? 1;
+  const providerSuccessfulCases = latest.provider_successful_cases ?? latest.cases;
+  const endToEndValidity =
+    latest.end_to_end_workflow_validity_rate ?? latest.workflow_validity_rate;
   return (
     <div className="page-stack">
       <Section title="AI workflow evaluation" icon={BarChart3}>
@@ -1652,12 +1666,14 @@ function EvaluationPage() {
             <span>{latest.config}</span>
           </div>
           <div className="command-grid">
-            <MetricTile label="Workflow validity" value={formatScore(latest.workflow_validity_rate)} icon={Check} accent="success" />
-            <MetricTile label="Hallucination rate" value={formatScore(latest.hallucinated_tool_rate)} icon={AlertTriangle} accent="warning" />
+            <MetricTile label="Provider success" value={formatScore(providerSuccessRate)} icon={Activity} accent="success" />
+            <MetricTile label="Quality validity" value={formatScore(latest.workflow_validity_rate)} icon={Check} accent="success" />
+            <MetricTile label="E2E validity" value={formatScore(endToEndValidity)} icon={Gauge} accent="neutral" />
+            <MetricTile label="Unexpected tools" value={formatScore(unexpectedToolRate)} icon={AlertTriangle} accent="warning" />
+            <MetricTile label="Unknown tools" value={formatScore(unknownToolRate)} icon={ShieldCheck} accent="danger" />
             <MetricTile label="Tool recall" value={formatScore(latest.tool_recall)} icon={Wrench} accent="neutral" />
-            <MetricTile label="Tool precision" value={formatScore(latest.tool_precision)} icon={Gauge} accent="neutral" />
+            <MetricTile label="Tool precision" value={formatScore(latest.tool_precision)} icon={ClipboardCheck} accent="neutral" />
             <MetricTile label="RAG Recall@K" value={formatScore(latest.rag_recall_at_k)} icon={BookOpen} accent="success" />
-            <MetricTile label="Policy violations" value={formatScore(latest.policy_violation_attempt_rate)} icon={ShieldCheck} accent="danger" />
             <MetricTile label="Approval accuracy" value={formatScore(latest.approval_classification_accuracy)} icon={ClipboardCheck} accent="purple" />
             <MetricTile label="E2E latency" value={`${latest.end_to_end_latency_ms.toFixed(1)} ms`} icon={Activity} accent="muted" />
           </div>
@@ -1666,10 +1682,12 @@ function EvaluationPage() {
               <thead>
                 <tr>
                   <th>Config</th>
+                  <th>Provider</th>
                   <th>Validity</th>
                   <th>Completion</th>
                   <th>Tool F1 inputs</th>
-                  <th>Hallucination</th>
+                  <th>Unexpected</th>
+                  <th>Unknown</th>
                   <th>RAG</th>
                   <th>Policy</th>
                   <th>Latency</th>
@@ -1679,12 +1697,18 @@ function EvaluationPage() {
                 {payload.summaries.map((summary) => (
                   <tr key={summary.config}>
                     <td>{summary.config}</td>
+                    <td>
+                      {summary.provider_successful_cases ?? summary.cases}/{summary.cases}
+                    </td>
                     <td>{formatScore(summary.workflow_validity_rate)}</td>
                     <td>{formatScore(summary.workflow_completion_rate)}</td>
                     <td>
                       {formatScore(summary.tool_recall)} / {formatScore(summary.tool_precision)}
                     </td>
-                    <td>{formatScore(summary.hallucinated_tool_rate)}</td>
+                    <td>
+                      {formatScore(summary.benchmark_unexpected_tool_rate ?? summary.hallucinated_tool_rate)}
+                    </td>
+                    <td>{formatScore(summary.unknown_or_disallowed_tool_rate ?? 0)}</td>
                     <td>
                       {formatScore(summary.rag_recall_at_k)} / {formatScore(summary.rag_mrr)}
                     </td>
@@ -1695,6 +1719,10 @@ function EvaluationPage() {
               </tbody>
             </table>
           </div>
+          <p className="muted-text">
+            Planner quality metrics use provider-successful cases only. End-to-end validity includes
+            provider availability failures. Provider-successful cases: {providerSuccessfulCases}/{latest.cases}.
+          </p>
         </div>
       </Section>
     </div>

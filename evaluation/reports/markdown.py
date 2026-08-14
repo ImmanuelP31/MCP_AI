@@ -19,22 +19,38 @@ def render_markdown_report(payload: Any) -> str:
         "## Summary",
         "",
         (
-            "| Config | Cases | Tool Recall | Tool Precision | Validity | Hallucination | "
-            "RAG Recall@K | Approval Accuracy | E2E Latency ms |"
+            "| Config | Attempted | Provider OK | Provider Success | Quality Validity | "
+            "Tool Recall | Tool Precision | Unexpected Tools | Unknown/Disallowed | "
+            "E2E Validity |"
         ),
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for summary in payload.summaries:
         lines.append(
             f"| {summary['config']} | {summary['cases']} | "
+            f"{_int(summary.get('provider_successful_cases'))} | "
+            f"{_number(summary.get('provider_success_rate')):.4f} | "
+            f"{_number(summary['workflow_validity_rate']):.4f} | "
             f"{_number(summary['tool_recall']):.4f} | "
             f"{_number(summary['tool_precision']):.4f} | "
-            f"{_number(summary['workflow_validity_rate']):.4f} | "
-            f"{_number(summary['hallucinated_tool_rate']):.4f} | "
-            f"{_number(summary['rag_recall_at_k']):.4f} | "
-            f"{_number(summary['approval_classification_accuracy']):.4f} | "
-            f"{_number(summary['end_to_end_latency_ms']):.2f} |"
+            f"{_number(summary.get('benchmark_unexpected_tool_rate')):.4f} | "
+            f"{_number(summary.get('unknown_or_disallowed_tool_rate')):.4f} | "
+            f"{_number(summary.get('end_to_end_workflow_validity_rate')):.4f} |"
         )
+    lines.extend(
+        [
+            "",
+            (
+                "Quality metrics use provider-successful cases only. End-to-end metrics include "
+                "provider availability failures."
+            ),
+            (
+                "`Unexpected Tools` means the tool existed but was outside benchmark expected or "
+                "acceptable tools. `Unknown/Disallowed` means an untrusted or undiscovered tool "
+                "was produced."
+            ),
+        ]
+    )
     failure_counts: dict[tuple[str, str], int] = {}
     for item in payload.cases:
         if item.get("workflow_valid"):
@@ -108,6 +124,10 @@ def render_markdown_report(payload: Any) -> str:
 
 def _number(value: object) -> float:
     return float(value) if isinstance(value, int | float) else 0.0
+
+
+def _int(value: object) -> int:
+    return int(value) if isinstance(value, int | float) else 0
 
 
 def _escape(value: str) -> str:

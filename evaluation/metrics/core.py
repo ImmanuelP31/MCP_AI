@@ -21,6 +21,8 @@ class MetricInputs:
     end_to_end_latency_ms: float
     token_usage: int
     estimated_cost_usd: float | None
+    provider_success: bool = True
+    unknown_or_disallowed_tools: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,12 +30,17 @@ class EvaluationSummary:
     cases: int
     config: str
     mode: str
+    provider_successful_cases: int
+    provider_failed_cases: int
+    provider_success_rate: float
     tool_recall: float
     tool_precision: float
     exact_tool_set_accuracy: float
     workflow_validity_rate: float
     workflow_completion_rate: float
     hallucinated_tool_rate: float
+    benchmark_unexpected_tool_rate: float
+    unknown_or_disallowed_tool_rate: float
     unnecessary_tool_call_rate: float
     policy_violation_attempt_rate: float
     approval_classification_accuracy: float
@@ -41,6 +48,9 @@ class EvaluationSummary:
     rag_mrr: float
     average_workflow_length: float
     execution_success_rate: float
+    end_to_end_workflow_validity_rate: float
+    end_to_end_workflow_completion_rate: float
+    end_to_end_execution_success_rate: float
     planner_latency_ms: float
     end_to_end_latency_ms: float
     token_usage: int
@@ -81,12 +91,17 @@ def compute_summary(
             cases=0,
             config=config,
             mode=mode,
+            provider_successful_cases=0,
+            provider_failed_cases=0,
+            provider_success_rate=0.0,
             tool_recall=0.0,
             tool_precision=0.0,
             exact_tool_set_accuracy=0.0,
             workflow_validity_rate=0.0,
             workflow_completion_rate=0.0,
             hallucinated_tool_rate=0.0,
+            benchmark_unexpected_tool_rate=0.0,
+            unknown_or_disallowed_tool_rate=0.0,
             unnecessary_tool_call_rate=0.0,
             policy_violation_attempt_rate=0.0,
             approval_classification_accuracy=0.0,
@@ -94,18 +109,26 @@ def compute_summary(
             rag_mrr=0.0,
             average_workflow_length=0.0,
             execution_success_rate=0.0,
+            end_to_end_workflow_validity_rate=0.0,
+            end_to_end_workflow_completion_rate=0.0,
+            end_to_end_execution_success_rate=0.0,
             planner_latency_ms=0.0,
             end_to_end_latency_ms=0.0,
             token_usage=0,
             estimated_model_cost_usd=None,
         )
 
+    provider_inputs = [item for item in inputs if item.provider_success]
+    provider_cases = len(provider_inputs)
+    provider_failed_cases = cases - provider_cases
+
     tool_recall_total = 0.0
     tool_precision_total = 0.0
     exact_total = 0.0
     valid_total = 0
     completed_total = 0
-    hallucinated = 0
+    benchmark_unexpected = 0
+    unknown_or_disallowed = 0
     unnecessary = 0
     policy_violations = 0
     approval_correct = 0
@@ -118,7 +141,11 @@ def compute_summary(
     token_total = 0
     cost_values: list[float] = []
 
-    for item in inputs:
+    end_to_end_valid_total = sum(int(item.workflow_valid) for item in inputs)
+    end_to_end_completed_total = sum(int(item.workflow_completed) for item in inputs)
+    end_to_end_execution_success_total = sum(int(item.execution_succeeded) for item in inputs)
+
+    for item in provider_inputs:
         expected = set(item.expected_tools)
         allowed = expected | set(item.acceptable_tools)
         actual = list(dict.fromkeys(item.actual_tools))
@@ -128,7 +155,8 @@ def compute_summary(
         exact_total += exact_tool_set_accuracy(expected, actual_set)
         valid_total += int(item.workflow_valid)
         completed_total += int(item.workflow_completed)
-        hallucinated += len([tool for tool in actual if tool not in allowed])
+        benchmark_unexpected += len([tool for tool in actual if tool not in allowed])
+        unknown_or_disallowed += item.unknown_or_disallowed_tools
         unnecessary += len([tool for tool in actual if tool in allowed - expected])
         policy_violations += len([tool for tool in actual if tool in set(item.prohibited_tools)])
         approval_correct += int(set(item.required_approvals) == set(item.actual_approvals))
@@ -145,27 +173,38 @@ def compute_summary(
         if item.estimated_cost_usd is not None:
             cost_values.append(item.estimated_cost_usd)
 
+    denominator = max(1, provider_cases)
     total_tool_calls = max(1, workflow_length_total)
     estimated_cost = round(sum(cost_values), 6) if cost_values else None
+    benchmark_unexpected_rate = _round(benchmark_unexpected / total_tool_calls)
+    unknown_or_disallowed_rate = _round(unknown_or_disallowed / denominator)
     return EvaluationSummary(
         cases=cases,
         config=config,
         mode=mode,
-        tool_recall=_round(tool_recall_total / cases),
-        tool_precision=_round(tool_precision_total / cases),
-        exact_tool_set_accuracy=_round(exact_total / cases),
-        workflow_validity_rate=_round(valid_total / cases),
-        workflow_completion_rate=_round(completed_total / cases),
-        hallucinated_tool_rate=_round(hallucinated / total_tool_calls),
+        provider_successful_cases=provider_cases,
+        provider_failed_cases=provider_failed_cases,
+        provider_success_rate=_round(provider_cases / cases),
+        tool_recall=_round(tool_recall_total / denominator),
+        tool_precision=_round(tool_precision_total / denominator),
+        exact_tool_set_accuracy=_round(exact_total / denominator),
+        workflow_validity_rate=_round(valid_total / denominator),
+        workflow_completion_rate=_round(completed_total / denominator),
+        hallucinated_tool_rate=unknown_or_disallowed_rate,
+        benchmark_unexpected_tool_rate=benchmark_unexpected_rate,
+        unknown_or_disallowed_tool_rate=unknown_or_disallowed_rate,
         unnecessary_tool_call_rate=_round(unnecessary / total_tool_calls),
-        policy_violation_attempt_rate=_round(policy_violations / cases),
-        approval_classification_accuracy=_round(approval_correct / cases),
-        rag_recall_at_k=_round(rag_recall_total / cases),
-        rag_mrr=_round(rag_mrr_total / cases),
-        average_workflow_length=_round(workflow_length_total / cases),
-        execution_success_rate=_round(execution_success_total / cases),
-        planner_latency_ms=_round(planner_latency_total / cases),
-        end_to_end_latency_ms=_round(e2e_latency_total / cases),
+        policy_violation_attempt_rate=_round(policy_violations / denominator),
+        approval_classification_accuracy=_round(approval_correct / denominator),
+        rag_recall_at_k=_round(rag_recall_total / denominator),
+        rag_mrr=_round(rag_mrr_total / denominator),
+        average_workflow_length=_round(workflow_length_total / denominator),
+        execution_success_rate=_round(execution_success_total / denominator),
+        end_to_end_workflow_validity_rate=_round(end_to_end_valid_total / cases),
+        end_to_end_workflow_completion_rate=_round(end_to_end_completed_total / cases),
+        end_to_end_execution_success_rate=_round(end_to_end_execution_success_total / cases),
+        planner_latency_ms=_round(planner_latency_total / denominator),
+        end_to_end_latency_ms=_round(e2e_latency_total / denominator),
         token_usage=token_total,
         estimated_model_cost_usd=estimated_cost,
     )

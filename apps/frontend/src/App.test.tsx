@@ -100,12 +100,17 @@ describe("App", () => {
               config: "semantic_rag_graph",
               mode: "mock",
               cases: 330,
+              provider_successful_cases: 330,
+              provider_failed_cases: 0,
+              provider_success_rate: 1,
               tool_recall: 0.63,
               tool_precision: 0.86,
               exact_tool_set_accuracy: 0.09,
               workflow_validity_rate: 0.75,
               workflow_completion_rate: 0.64,
               hallucinated_tool_rate: 0.18,
+              benchmark_unexpected_tool_rate: 0.18,
+              unknown_or_disallowed_tool_rate: 0,
               unnecessary_tool_call_rate: 0.1,
               policy_violation_attempt_rate: 0,
               approval_classification_accuracy: 0.81,
@@ -113,6 +118,8 @@ describe("App", () => {
               rag_mrr: 0.46,
               average_workflow_length: 2.75,
               execution_success_rate: 0.64,
+              end_to_end_workflow_validity_rate: 0.75,
+              end_to_end_execution_success_rate: 0.64,
               planner_latency_ms: 9.8,
               end_to_end_latency_ms: 57.4,
               token_usage: 0,
@@ -126,8 +133,9 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("AI workflow evaluation")).toBeTruthy();
-    expect(screen.getByText("Workflow validity")).toBeTruthy();
-    expect(screen.getByText("Hallucination rate")).toBeTruthy();
+    expect(screen.getByText("Provider success")).toBeTruthy();
+    expect(screen.getByText("Quality validity")).toBeTruthy();
+    expect(screen.getByText("Unexpected tools")).toBeTruthy();
     vi.unstubAllGlobals();
   });
 });
