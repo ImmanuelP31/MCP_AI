@@ -1,6 +1,6 @@
 # Live Gemini Held-Out Adversarial Benchmark
 
-Latest measured rerun: `2026-08-14T08:21:08Z`
+Latest measured rerun: `2026-08-18T10:42:30Z`
 
 ## Baseline Before Compact Planner Contract
 
@@ -30,7 +30,7 @@ Provider provenance:
 - Retrieval backend: `in-memory-hashing`
 - Embedding fallback allowed: `false`
 
-Results:
+Historical pre-fix results:
 
 | Metric | Value |
 | --- | ---: |
@@ -39,15 +39,15 @@ Results:
 | Tool precision | 0.9743 |
 | Exact tool-set accuracy | 0.1200 |
 | Workflow validity rate | 0.1000 |
-| Workflow completion rate | 0.1000 |
-| Hallucinated tool rate | 0.2778 |
+| Plan acceptance / old completion label | 0.1000 |
+| Benchmark-unexpected tool rate / old hallucinated label | 0.2778 |
 | Unnecessary tool-call rate | 0.1667 |
 | Policy violation attempt rate | 0.0000 |
 | Approval classification accuracy | 0.8600 |
 | RAG Recall@K | 0.0600 |
 | RAG MRR | 0.0000 |
 | Average workflow length | 0.36 |
-| Execution success rate | 0.1000 |
+| Execution success rate / old plan-acceptance label | 0.1000 |
 | Average planner latency | 6071.1077 ms |
 | Average end-to-end latency | 6071.1103 ms |
 | Estimated model cost | 0.002146 USD |
@@ -58,9 +58,9 @@ Failure distribution:
 - `PlannerOutputError`: 45 / 50
 
 Important caveat: Gemini embeddings were attempted separately and returned HTTP `429`, so this
-completed live run uses Gemini for planning and deterministic hashing for retrieval. The low
-workflow-validity rate is retained as a failure-analysis signal rather than hidden or re-labeled as
-a successful production benchmark.
+completed live run uses Gemini for planning and deterministic hashing for retrieval. These numbers
+were generated before the evaluator separated plan acceptance from execution success, so they are
+retained only as failure-analysis history.
 
 ## Intervention
 
@@ -106,7 +106,7 @@ Measured result:
 | Workflow validity rate | 1.0000 |
 | Tool recall | 0.5000 |
 | Tool precision | 0.6667 |
-| Hallucinated tool rate | 0.3333 |
+| Benchmark-unexpected tool rate | 0.3333 |
 | Approval classification accuracy | 0.6000 |
 | Provider/planner-output failures | 0 |
 
@@ -135,38 +135,41 @@ Measured result:
 | Metric | Value |
 | --- | ---: |
 | Cases | 50 |
-| Provider-successful cases | 30 |
-| Provider success rate | 0.6000 |
-| Quality workflow validity rate | 0.9000 |
-| End-to-end workflow validity rate | 0.5400 |
-| Tool recall | 0.3556 |
-| Tool precision | 0.6906 |
-| Exact tool-set accuracy | 0.1000 |
-| Workflow completion rate | 0.8000 |
-| Benchmark-unexpected tool rate | 0.4694 |
+| Provider-successful cases | 34 |
+| Provider success rate | 0.6800 |
+| Quality workflow validity rate | 0.9118 |
+| End-to-end workflow validity rate | 0.6200 |
+| Tool recall | 0.3358 |
+| Tool precision | 0.3309 |
+| Exact tool-set accuracy | 0.0882 |
+| Plan acceptance rate | 0.8235 |
+| End-to-end plan acceptance rate | 0.5600 |
+| Benchmark-unexpected tool rate | 0.5283 |
 | Unknown/disallowed tool-call rate | 0.0000 |
 | Cases with unknown/disallowed tools | 0.0000 |
-| Unnecessary tool-call rate | 0.1633 |
-| Policy violation attempt rate | 0.0333 |
-| Approval classification accuracy | 0.8333 |
-| RAG Recall@K | 0.2111 |
-| RAG MRR | 0.0944 |
-| Average workflow length | 1.6333 |
-| Execution success rate | 0.8000 |
-| End-to-end execution success rate | 0.4800 |
-| Average planner latency | 2470.9945 ms |
-| Average end-to-end latency | 2470.9986 ms |
-| Estimated model cost | 0.003130 USD |
+| Unnecessary tool-call rate | 0.1321 |
+| Policy violation attempt rate | 0.0294 |
+| Approval classification accuracy | 0.9118 |
+| RAG Recall@K | 0.2059 |
+| RAG MRR | 0.0809 |
+| Average workflow length | 1.5588 |
+| Execution success rate | 0.0000 |
+| End-to-end execution success rate | 0.0000 |
+| Average planner latency | 2703.9679 ms |
+| Average end-to-end latency | 2703.9717 ms |
+| Estimated model cost | 0.003434 USD |
 
 Failure distribution:
 
-- Provider HTTP `429`: 20 / 50
+- Provider HTTP `429`: 16 / 50
 - Planner-output/schema failures: 0 / 50
 - Workflow-validation failures: 3 / 50
 - Immediate provider retries: 0
 
 Interpretation: the original `45/50 PlannerOutputError` problem is no longer reproduced after the
-compact planner contract. Among the 30 provider-successful cases, 27 produced structurally valid
-workflows and no unknown/disallowed tools reached the final trusted workflow. The remaining
-end-to-end validity limit is now split between Gemini provider quota/rate-limit failures and
-semantic workflow quality, not malformed planner output.
+compact planner contract. Among the 34 provider-successful cases, 31 produced structurally valid
+workflows, 28 satisfied the benchmark policy/approval expectations, and no unknown/disallowed tools
+reached the final trusted workflow. The benchmark did not execute MCP tools, so plan acceptance is
+reported separately from execution success. The remaining end-to-end validity limit is now split
+between Gemini provider quota/rate-limit failures and semantic workflow quality, not malformed
+planner output.

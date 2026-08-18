@@ -20,9 +20,9 @@ jobs:
       - name: Lint
         run: python -m ruff check .
       - name: Type check
-        run: python -m mypy apps packages services tests scripts
+        run: python -m mypy apps packages services tests scripts evaluation
       - name: Python security scan
-        run: python -m bandit -c pyproject.toml -r apps packages services scripts tests
+        run: python -m bandit -c pyproject.toml -r apps packages services scripts tests evaluation
       - name: Python dependency audit
         run: python -m pip_audit
       - name: Unit, contract, and integration tests

@@ -56,15 +56,16 @@ The default mode is deterministic/mock. In mock mode, token usage is `0` and mod
 - Tool Precision
 - Exact Tool Set Accuracy
 - Workflow Validity Rate
-- Workflow Completion Rate
-- Hallucinated Tool Rate
+- Plan Acceptance Rate
+- Benchmark-Unexpected Tool Rate
+- Unknown/Disallowed Tool-Call Rate
 - Unnecessary Tool Call Rate
 - Policy Violation Attempt Rate
 - Approval Classification Accuracy
 - RAG Recall@K
 - RAG MRR
 - Average Workflow Length
-- Execution Success Rate
+- Execution Success Rate, only when the benchmark explicitly executes workflows
 - Planner Latency
 - End-to-End Latency
 - Token Usage

@@ -15,7 +15,7 @@ Generated during the final presentation-readiness pass.
 | OpenSearch RAG backend | Live validated | Query returned `index_backend: opensearch` with the controlled failing workflow as top result. |
 | Gemini planner | Live validated | `LLM_PLANNER_PROVIDER=gemini` now uses a compact `PLAN`/`CLARIFY`/`REFUSE` contract compiled by trusted backend code. |
 | Gemini embeddings | Implemented | `EMBEDDING_PROVIDER=gemini` uses Gemini embeddings for tool discovery and engineering RAG. |
-| 30-50 live LLM benchmark | Rerun with caveat | 50-case rerun reached 30/50 provider-successful responses, 27/30 structurally valid workflows, and 0 unknown/disallowed tool calls; 20 cases were Gemini HTTP 429 provider failures. |
+| 30-50 live LLM benchmark | Rerun with caveat | 50-case rerun reached 34/50 provider-successful responses, 31/34 structurally valid workflows, and 0 unknown/disallowed tool calls; 16 cases were Gemini HTTP 429 provider failures. |
 | Hashing vs real embedding comparison | Ready to rerun | Hashing baseline is available; Gemini embedding mode is now the live provider path. |
 
 ## OpenSearch RAG Evidence
@@ -112,24 +112,27 @@ python -m evaluation.run --config semantic_rag_graph --mode real --dataset heldo
 Full-run result:
 
 - Cases: `50`
-- Provider-successful cases: `30 / 50`
-- Provider success rate: `0.6000`
-- Quality workflow validity: `0.9000`
-- End-to-end workflow validity: `0.5400`
-- Tool recall: `0.3556`
-- Tool precision: `0.6906`
-- Benchmark-unexpected tool rate: `0.4694`
+- Provider-successful cases: `34 / 50`
+- Provider success rate: `0.6800`
+- Quality workflow validity: `0.9118`
+- Provider-success plan acceptance: `0.8235`
+- End-to-end workflow validity: `0.6200`
+- End-to-end plan acceptance: `0.5600`
+- Tool recall: `0.3358`
+- Tool precision: `0.3309`
+- Benchmark-unexpected tool rate: `0.5283`
 - Unknown/disallowed tool-call rate: `0.0000`
-- Approval classification accuracy: `0.8333`
-- RAG Recall@K: `0.2111`
-- Provider HTTP `429`: `20 / 50`
+- Approval classification accuracy: `0.9118`
+- RAG Recall@K: `0.2059`
+- Provider HTTP `429`: `16 / 50`
 - Planner-output/schema failures: `0 / 50`
 - Workflow-validation failures: `3 / 50`
 
 Interpretation: the earlier `45 / 50 PlannerOutputError` failure mode is no longer reproduced. On
-provider-successful cases, the compact contract now mostly produces structurally valid workflows.
-The remaining live benchmark gap is provider availability plus semantic quality, especially tool
-recall, benchmark-unexpected tool selection, and RAG recall.
+provider-successful cases, the compact contract now mostly produces structurally valid workflows
+and plan-accepted workflows. The benchmark does not execute MCP tools, so execution success remains
+separate from plan acceptance. The remaining live benchmark gap is provider availability plus
+semantic quality, especially tool recall, benchmark-unexpected tool selection, and RAG recall.
 
 ## Optional Rerun With Gemini Embeddings
 

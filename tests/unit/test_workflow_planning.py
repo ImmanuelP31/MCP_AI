@@ -422,7 +422,7 @@ def test_llm_workflow_planner_fills_trusted_tool_metadata_and_arguments() -> Non
                             "tool_server": "malicious-mcp",
                             "risk_level": "CRITICAL",
                             "approval_required": True,
-                            "arguments": {},
+                            "arguments": {"repository": "ImmanuelP31/MCP_AI"},
                         }
                     ],
                     "confidence": 0.8,
@@ -443,6 +443,66 @@ def test_llm_workflow_planner_fills_trusted_tool_metadata_and_arguments() -> Non
     assert node.risk_level == "READ_ONLY"
     assert node.approval_required is False
     assert node.arguments == {"repository": "ImmanuelP31/MCP_AI"}
+
+
+def test_llm_workflow_planner_does_not_invent_demo_runtime_ids() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Get failed jobs for the latest failed build.",
+        role="ENGINEER",
+        top_k=20,
+    )
+    payload = {
+        "decision": "PLAN",
+        "confidence": 0.8,
+        "nodes": [{"id": "failed_jobs", "tool_name": "get_failed_jobs", "arguments": {}}],
+    }
+
+    draft = LLMWorkflowPlanner(
+        FakeWorkflowPlanClient([json.dumps(payload)]),
+        model_name="test-model",
+    ).plan("Get failed jobs for the latest failed build.", tools, role="ENGINEER")
+
+    assert draft.nodes[0].tool_name == "get_failed_jobs"
+    assert draft.nodes[0].arguments.get("run_id") != 9001
+    assert "run_id" not in draft.nodes[0].arguments
+
+
+def test_llm_workflow_planner_resolves_common_synthetic_dependency_ids() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Get failed jobs and then retrieve logs for the failed job.",
+        role="ENGINEER",
+        top_k=20,
+    )
+    payload = {
+        "decision": "PLAN",
+        "confidence": 0.82,
+        "nodes": [
+            {"tool_name": "get_failed_jobs", "arguments": {"run_id": 481}},
+            {
+                "id": "logs",
+                "tool_name": "get_pipeline_logs",
+                "depends_on": ["node_0"],
+                "arguments": {"job_id": {"$from": "node_0.jobs.0.id"}},
+            },
+        ],
+    }
+
+    draft = LLMWorkflowPlanner(
+        FakeWorkflowPlanClient([json.dumps(payload)]),
+        model_name="test-model",
+    ).plan(
+        "Get failed jobs and then retrieve logs for the failed job.",
+        tools,
+        role="ENGINEER",
+    )
+
+    assert draft.nodes[1].depends_on == [draft.nodes[0].id]
+    assert draft.nodes[1].argument_references[0].source_node_id == draft.nodes[0].id
+    assert [(edge.source, edge.destination) for edge in draft.edges] == [
+        (draft.nodes[0].id, "logs")
+    ]
 
 
 def test_llm_workflow_planner_preserves_safe_arguments_and_typed_references() -> None:

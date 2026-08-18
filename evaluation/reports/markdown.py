@@ -20,10 +20,10 @@ def render_markdown_report(payload: Any) -> str:
         "",
         (
             "| Config | Attempted | Provider OK | Provider Success | Quality Validity | "
-            "Tool Recall | Tool Precision | Unexpected Tools | Unknown Calls | "
+            "Plan Accepted | Tool Recall | Tool Precision | Unexpected Tools | Unknown Calls | "
             "Unknown Cases | E2E Validity |"
         ),
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for summary in payload.summaries:
         lines.append(
@@ -31,6 +31,7 @@ def render_markdown_report(payload: Any) -> str:
             f"{_int(summary.get('provider_successful_cases'))} | "
             f"{_number(summary.get('provider_success_rate')):.4f} | "
             f"{_number(summary['workflow_validity_rate']):.4f} | "
+            f"{_number(summary.get('plan_acceptance_rate')):.4f} | "
             f"{_number(summary['tool_recall']):.4f} | "
             f"{_number(summary['tool_precision']):.4f} | "
             f"{_number(summary.get('benchmark_unexpected_tool_rate')):.4f} | "
@@ -44,6 +45,11 @@ def render_markdown_report(payload: Any) -> str:
             (
                 "Quality metrics use provider-successful cases only. End-to-end metrics include "
                 "provider availability failures."
+            ),
+            (
+                "`Plan Accepted` means the planned workflow satisfied benchmark policy/approval "
+                "expectations. It is not tool execution success unless the benchmark explicitly "
+                "runs execution."
             ),
             (
                 "`Unexpected Tools` means the tool existed but was outside benchmark expected or "

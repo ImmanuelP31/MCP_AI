@@ -65,6 +65,8 @@ def test_precision_recall_exact_accuracy_and_mrr_are_computed() -> None:
 
     assert recall(expected, actual) == 0.5
     assert precision(expected | {"create_ticket"}, ["get_build_status", "create_ticket"]) == 1.0
+    assert precision(expected, [], expected) == 0.0
+    assert precision(set(), [], set()) == 1.0
     assert exact_tool_set_accuracy(expected, actual) == 0.0
     assert mean_reciprocal_rank({"DOC-2"}, ["DOC-1", "DOC-2"]) == 0.5
 
@@ -113,6 +115,7 @@ def test_summary_metrics_capture_policy_approval_rag_and_latency() -> None:
 
     assert summary.cases == 2
     assert summary.workflow_validity_rate == 0.5
+    assert summary.plan_acceptance_rate == 0.5
     assert summary.approval_classification_accuracy == 0.5
     assert summary.policy_violation_attempt_rate == 0.5
     assert summary.rag_mrr == 0.25
@@ -171,6 +174,7 @@ def test_summary_metrics_separate_provider_availability_from_planner_quality() -
     assert summary.approval_classification_accuracy == 1.0
     assert summary.workflow_validity_rate == 1.0
     assert summary.end_to_end_workflow_validity_rate == 0.5
+    assert summary.execution_success_rate == 1.0
 
 
 def test_unknown_tool_metrics_distinguish_call_rate_from_case_rate() -> None:

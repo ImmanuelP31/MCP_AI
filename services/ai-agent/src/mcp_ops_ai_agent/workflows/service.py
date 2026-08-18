@@ -136,6 +136,11 @@ class WorkflowPlanningService:
                     knowledge_response,
                     role=request.role,
                 )
+            discovered_tools = _filter_planner_visible_tools(
+                discovered_tools,
+                evaluator=self.policy_evaluator,
+                request=request,
+            )
             ordered_tool_names = (
                 self.capability_graph.constrain_tool_sequence(
                     user_request=request.user_request,
@@ -167,6 +172,7 @@ class WorkflowPlanningService:
                 request.user_request,
                 discovered_tools,
                 role=request.role,
+                target_environment=request.target_environment,
                 knowledge=knowledge_response.results,
             )
             planner_model = draft.planner_model
@@ -981,6 +987,72 @@ def _augment_tools_from_knowledge(
         additions.append(tool)
         existing.add(tool.name)
     return [*discovered_tools, *additions]
+
+
+def _filter_planner_visible_tools(
+    tools: list[ToolDocument],
+    *,
+    evaluator: WorkflowPolicyEvaluator,
+    request: WorkflowPlanRequest,
+) -> list[ToolDocument]:
+    filtered: list[ToolDocument] = []
+    for tool in tools:
+        node = WorkflowNode(
+            id=f"policy_check_{tool.name}"[:120],
+            tool_name=tool.name,
+            tool_server=tool.server,
+            description=tool.description,
+            arguments=_planning_filter_arguments(tool, request),
+            risk_level=tool.risk_level,
+            approval_required=tool.risk_level in {"HIGH", "CRITICAL"},
+        )
+        evaluation = evaluator.evaluate(
+            node,
+            actor=request.created_by,
+            role=request.role,
+            environment=request.target_environment,
+            phase="planning",
+        )
+        if evaluation.decision in {PolicyDecision.ALLOW, PolicyDecision.ALLOW_WITH_APPROVAL}:
+            filtered.append(tool)
+    return filtered
+
+
+def _planning_filter_arguments(tool: ToolDocument, request: WorkflowPlanRequest) -> dict[str, Any]:
+    properties = tool.input_schema.get("properties", {})
+    if not isinstance(properties, dict):
+        return {}
+    arguments: dict[str, Any] = {}
+    configured_repository = _configured_repository()
+    if "repository" in properties and configured_repository:
+        arguments["repository"] = configured_repository
+    device = _device_from_request(request.user_request)
+    if "device_id" in properties and device:
+        arguments["device_id"] = device
+    if "environment" in properties:
+        arguments["environment"] = request.target_environment
+    return arguments
+
+
+def _configured_repository() -> str | None:
+    from mcp_ops_common.config import get_settings
+
+    settings = get_settings()
+    if settings.github_owner and settings.github_repo:
+        return f"{settings.github_owner}/{settings.github_repo}"
+    allowed = [
+        item.strip()
+        for item in settings.github_allowed_repositories.split(",")
+        if item.strip()
+    ]
+    return sorted(allowed)[0] if allowed else None
+
+
+def _device_from_request(user_request: str) -> str | None:
+    import re
+
+    match = re.search(r"\bSIM-\d{3}\b", user_request, flags=re.IGNORECASE)
+    return match.group(0).upper() if match else None
 
 
 def _role_token(role: str) -> str:

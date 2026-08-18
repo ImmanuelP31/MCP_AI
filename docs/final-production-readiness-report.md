@@ -1,22 +1,22 @@
 # Final Production-Readiness Report
 
-Date: 2026-08-11
+Date: 2026-08-18
 
 ## Measured Validation
 
 | Check | Result |
 | --- | --- |
-| Backend tests | 294 passed |
+| Backend tests | 404 passed |
 | Frontend unit tests | 9 passed |
 | Frontend lint | passed |
 | Frontend TypeScript check | passed |
 | Frontend production build | passed |
 | Frontend E2E | 1 passed |
 | Ruff | passed |
-| mypy | passed, 146 source files |
-| Bandit | no issues identified |
-| Docker Compose config | passed |
-| Docker Compose startup | API, MCP gateway, simulator, PostgreSQL, Redis, Kafka, OpenSearch healthy; frontend, Prometheus, Grafana running |
+| mypy | passed, 160 source files |
+| Bandit | no issues identified across 23,694 scanned LOC |
+| Docker Compose config | passed; Docker emitted a local config-file access warning |
+| Docker Compose startup | not rerun in this pass because Docker Engine access was denied from this session |
 | Empty database migration | passed, upgraded to head |
 | Previous schema migration | passed, `0004_workflow_resiliency` to head |
 
@@ -33,19 +33,21 @@ Date: 2026-08-11
 
 ## Latest Evaluation Metrics
 
-Mock-mode baseline results retained for comparison. The tracked `evaluation/results/latest.json`
-artifact reflects the latest committed evaluation run and may be mock or live.
+Mock-mode baseline results are retained in historical artifacts for comparison. The tracked
+`evaluation/results/latest.json` artifact currently reflects a live 50-case Gemini held-out run
+with hashing retrieval.
 
-| Configuration | Cases | Tool Recall | Tool Precision | Workflow Validity | Unknown/Disallowed Tool Rate | RAG Recall@K | Execution Success |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| all_tools | 330 | 0.5379 | 0.8427 | 0.6545 | 0.2192 | 0.0000 | 0.5455 |
-| semantic | 330 | 0.5424 | 0.8710 | 0.7455 | 0.1761 | 0.0000 | 0.6364 |
-| semantic_rag | 330 | 0.6288 | 0.8720 | 0.7455 | 0.1706 | 0.7318 | 0.6364 |
-| semantic_rag_graph | 330 | 0.6318 | 0.8659 | 0.7545 | 0.1755 | 0.7409 | 0.6364 |
+| Configuration | Cases | Provider OK | Tool Recall | Tool Precision | Workflow Validity | Unknown/Disallowed Tool Rate | RAG Recall@K | Plan Acceptance |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| semantic_rag_graph | 50 | 34 | 0.3358 | 0.3309 | 0.9118 | 0.0000 | 0.2059 | 0.8235 |
+
+Provider-success quality metrics are computed over provider-successful cases only. End-to-end
+workflow validity was `0.6200` because 16 cases returned Gemini HTTP `429`. This benchmark did not
+execute MCP tools, so execution success is intentionally not claimed.
 
 ## Readiness Endpoints
 
-Live Docker readiness returned:
+The previous Docker readiness pass returned:
 
 - API: `ready` with API, PostgreSQL, Redis, Kafka, OpenSearch, Device MCP, Diagnostics MCP, Knowledge MCP, Ticket MCP, and model provider components.
 - MCP Gateway: `ready` with gateway, tool registry, approval store, and audit log components.

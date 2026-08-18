@@ -28,6 +28,7 @@ class WorkflowPlanner(Protocol):
         tools: list[ToolDocument],
         *,
         role: str,
+        target_environment: str = "dev",
         knowledge: list[KnowledgeSearchResult] | None = None,
     ) -> WorkflowPlanDraft:
         """Create a typed workflow draft from a safe tool subset."""
@@ -331,15 +332,17 @@ class LLMWorkflowPlanner:
         tools: list[ToolDocument],
         *,
         role: str,
+        target_environment: str = "dev",
         knowledge: list[KnowledgeSearchResult] | None = None,
     ) -> WorkflowPlanDraft:
-        payload = _planner_payload(user_request, tools, role, knowledge or [])
+        payload = _planner_payload(user_request, tools, role, target_environment, knowledge or [])
         system_prompt = _planner_system_prompt()
         try:
             return self._parse(
                 self.client.complete_json(system_prompt=system_prompt, user_payload=payload),
                 user_request,
                 tools,
+                target_environment=target_environment,
                 attempt=1,
             )
         except PlannerOutputError as first_error:
@@ -370,6 +373,7 @@ class LLMWorkflowPlanner:
                     ),
                     user_request,
                     tools,
+                    target_environment=target_environment,
                     attempt=2,
                 )
             except PlannerOutputError as second_error:
@@ -390,6 +394,7 @@ class LLMWorkflowPlanner:
         user_request: str,
         tools: list[ToolDocument],
         *,
+        target_environment: str = "dev",
         attempt: int = 1,
     ) -> WorkflowPlanDraft:
         try:
@@ -407,9 +412,15 @@ class LLMWorkflowPlanner:
                     planner_model=self.planner_model,
                     user_request=user_request,
                     tools=tools,
+                    target_environment=target_environment,
                     attempt=attempt,
                 )
-            normalized = _normalize_plan_payload(payload, self.planner_model, user_request, tools)
+            normalized = _normalize_plan_payload(
+                payload,
+                self.planner_model,
+                user_request,
+                tools,
+            )
             normalized.setdefault("planner_model", self.planner_model)
             return WorkflowPlanDraft.model_validate(normalized)
         except json.JSONDecodeError as exc:
@@ -439,9 +450,10 @@ class DeterministicWorkflowPlanner:
         tools: list[ToolDocument],
         *,
         role: str,
+        target_environment: str = "dev",
         knowledge: list[KnowledgeSearchResult] | None = None,
     ) -> WorkflowPlanDraft:
-        del role
+        del role, target_environment
         available = {tool.name: tool for tool in tools}
         normalized = user_request.lower()
         if "build" in normalized or "pipeline" in normalized or "ci" in normalized:
@@ -472,9 +484,10 @@ class JsonWorkflowPlanner:
         tools: list[ToolDocument],
         *,
         role: str,
+        target_environment: str = "dev",
         knowledge: list[KnowledgeSearchResult] | None = None,
     ) -> WorkflowPlanDraft:
-        del user_request, tools, role, knowledge
+        del user_request, tools, role, target_environment, knowledge
         try:
             json.loads(self.raw_json)
             return WorkflowPlanDraft.model_validate_json(self.raw_json)
@@ -768,8 +781,15 @@ def _node(
     )
 
 
-def _arguments_for(tool: ToolDocument, user_request: str) -> dict[str, object]:
-    github_repository = "ImmanuelP31/MCP_AI"
+def _arguments_for(
+    tool: ToolDocument,
+    user_request: str,
+    *,
+    allow_demo_defaults: bool = True,
+) -> dict[str, object]:
+    github_repository = _current_repository() or (
+        "ImmanuelP31/MCP_AI" if allow_demo_defaults else None
+    )
     if tool.name in {
         "get_build_status",
         "get_latest_failed_build",
@@ -778,33 +798,56 @@ def _arguments_for(tool: ToolDocument, user_request: str) -> dict[str, object]:
         "get_commit_history",
         "list_recent_commits",
     }:
-        return {"repository": github_repository}
+        return _with_repository(github_repository)
     if tool.name in {"get_failed_jobs", "get_workflow_run_jobs"}:
+        if not allow_demo_defaults:
+            return _with_repository(github_repository)
         return {"repository": github_repository, "run_id": 9001}
     if tool.name in {"get_pipeline_logs", "get_job_logs"}:
+        if not allow_demo_defaults:
+            return {**_with_repository(github_repository), "max_bytes": 12000}
         return {"repository": github_repository, "job_id": 101}
     if tool.name == "get_commit_details":
+        if not allow_demo_defaults:
+            return _with_repository(github_repository)
         return {"repository": github_repository, "sha": "abc1234"}
     if tool.name == "get_changed_files":
+        if not allow_demo_defaults:
+            return _with_repository(github_repository)
         return {"repository": github_repository, "head": "abc1234"}
     if tool.name == "summarize_diff":
+        if not allow_demo_defaults:
+            return {**_with_repository(github_repository), "max_files": 20}
         return {"repository": github_repository, "head": "abc1234", "max_files": 20}
     if tool.name == "get_pull_request":
+        if not allow_demo_defaults:
+            return _with_repository(github_repository)
         return {"repository": github_repository, "pull_number": 31}
     if tool.name == "run_tests":
         return {
-            "repository": github_repository,
+            **_with_repository(github_repository),
             "branch": "main",
             "test_suite": "bounded",
             "reason": "Governed workflow validation before deployment.",
         }
     if tool.name == "rerun_build":
+        if not allow_demo_defaults:
+            return {
+                **_with_repository(github_repository),
+                "reason": "Governed build rerun after investigation.",
+            }
         return {
             "repository": github_repository,
             "run_id": 9001,
             "reason": "Governed build rerun after investigation.",
         }
     if tool.name == "analyze_build_failure":
+        if not allow_demo_defaults:
+            return {
+                **_with_repository(github_repository),
+                "logs": "",
+                "changed_files": [],
+            }
         return {
             "repository": github_repository,
             "logs": "Running demo test suite\nSimulated test failure in payments-api\n",
@@ -813,12 +856,17 @@ def _arguments_for(tool: ToolDocument, user_request: str) -> dict[str, object]:
         }
     if tool.name == "create_issue":
         return {
-            "repository": github_repository,
+            **_with_repository(github_repository),
             "title": "Investigate failed GitHub Actions build",
             "body": f"Workflow-created GitHub issue from request: {user_request[:500]}",
             "labels": ["mcp", "automated-investigation"],
         }
     if tool.name == "rerun_workflow":
+        if not allow_demo_defaults:
+            return {
+                **_with_repository(github_repository),
+                "reason": "Approved CI rerun after governed investigation.",
+            }
         return {
             "repository": github_repository,
             "run_id": 9001,
@@ -831,35 +879,64 @@ def _arguments_for(tool: ToolDocument, user_request: str) -> dict[str, object]:
         "restart_service",
     }
     if tool.name in device_tools:
-        arguments: dict[str, object] = {"device_id": "SIM-014"}
+        device_id = _device_from_request(user_request) or (
+            "SIM-014" if allow_demo_defaults else None
+        )
+        arguments: dict[str, object] = {}
+        if device_id:
+            arguments["device_id"] = device_id
         if tool.name == "restart_service":
-            arguments["service_name"] = "sensor-ingestor"
+            service_name = _service_from_request(user_request) or (
+                "sensor-ingestor" if allow_demo_defaults else None
+            )
+            if service_name:
+                arguments["service_name"] = service_name
             arguments["reason"] = "Workflow requested governed service recovery."
         return arguments
     if tool.name == "create_ticket":
+        device_id = _device_from_request(user_request) or (
+            "SIM-014" if allow_demo_defaults else None
+        )
         return {
-            "device_id": "SIM-014",
+            **({"device_id": device_id} if device_id else {}),
             "title": "Investigate engineering workflow finding",
             "description": f"Workflow-created ticket from request: {user_request[:500]}",
             "priority": "HIGH",
             "team": "Engineering Operations",
             "diagnostic_evidence": {"source": "workflow_planner"},
         }
-    schema_defaults = _schema_default_arguments(tool, user_request)
+    schema_defaults = _schema_default_arguments(
+        tool,
+        user_request,
+        allow_demo_defaults=allow_demo_defaults,
+    )
     if schema_defaults:
         return schema_defaults
     return {}
 
 
-def _schema_default_arguments(tool: ToolDocument, user_request: str) -> dict[str, object]:
+def _schema_default_arguments(
+    tool: ToolDocument,
+    user_request: str,
+    *,
+    allow_demo_defaults: bool = True,
+) -> dict[str, object]:
     properties = tool.input_schema.get("properties", {})
     if not isinstance(properties, dict):
         return {}
     arguments: dict[str, object] = {}
     if "device_id" in properties:
-        arguments["device_id"] = "SIM-014"
+        device_id = _device_from_request(user_request) or (
+            "SIM-014" if allow_demo_defaults else None
+        )
+        if device_id:
+            arguments["device_id"] = device_id
     if "repository" in properties:
-        arguments["repository"] = "ImmanuelP31/MCP_AI"
+        repository = _current_repository() or (
+            "ImmanuelP31/MCP_AI" if allow_demo_defaults else None
+        )
+        if repository:
+            arguments["repository"] = repository
     if "query" in properties:
         arguments["query"] = user_request[:500]
     required = tool.input_schema.get("required", [])
@@ -869,10 +946,18 @@ def _schema_default_arguments(tool: ToolDocument, user_request: str) -> dict[str
                 continue
             if field_name in arguments:
                 continue
-            placeholder = _placeholder_for_field(field_name, properties.get(field_name))
+            placeholder = _placeholder_for_field(
+                field_name,
+                properties.get(field_name),
+                allow_demo_defaults=allow_demo_defaults,
+            )
             if placeholder is not None:
                 arguments[field_name] = placeholder
     return arguments
+
+
+def _with_repository(repository: str | None) -> dict[str, object]:
+    return {"repository": repository} if repository else {}
 
 
 _REFERENCE_PATTERN = re.compile(
@@ -895,8 +980,9 @@ def _trusted_arguments_for(
     proposed: dict[str, Any],
     *,
     depends_on: list[str],
+    allow_demo_defaults: bool = True,
 ) -> tuple[dict[str, object], list[dict[str, str]]]:
-    arguments = _arguments_for(tool, user_request)
+    arguments = _arguments_for(tool, user_request, allow_demo_defaults=allow_demo_defaults)
     references: list[dict[str, str]] = []
     properties = tool.input_schema.get("properties", {})
     if not isinstance(properties, dict):
@@ -916,18 +1002,75 @@ def _trusted_arguments_for(
             references.append(reference)
             if key in arguments:
                 continue
-            placeholder = _placeholder_for_field(key, properties.get(key))
+            placeholder = _placeholder_for_field(
+                key,
+                properties.get(key),
+                allow_demo_defaults=allow_demo_defaults,
+                reference_target=True,
+            )
             if placeholder is not None:
                 arguments[key] = placeholder
+            continue
+        if not allow_demo_defaults and _is_demo_sentinel_value(key, value):
             continue
         sanitized = _sanitize_argument_value(key, value, properties.get(key))
         if sanitized is not None:
             arguments[key] = sanitized
     for key in sorted(required - set(arguments)):
-        placeholder = _placeholder_for_field(key, properties.get(key))
+        inferred = _inferred_argument_reference(tool.name, key, depends_on)
+        if inferred is not None:
+            references.append(inferred)
+            placeholder = _placeholder_for_field(
+                key,
+                properties.get(key),
+                allow_demo_defaults=allow_demo_defaults,
+                reference_target=True,
+            )
+            if placeholder is not None:
+                arguments[key] = placeholder
+            continue
+        if not allow_demo_defaults and _requires_runtime_binding(key):
+            continue
+        placeholder = _placeholder_for_field(
+            key,
+            properties.get(key),
+            allow_demo_defaults=allow_demo_defaults,
+        )
         if placeholder is not None:
             arguments[key] = placeholder
     return arguments, references
+
+
+def _inferred_argument_reference(
+    tool_name: str,
+    field_name: str,
+    depends_on: list[str],
+) -> dict[str, str] | None:
+    for dependency in depends_on:
+        lowered = dependency.lower()
+        if field_name == "run_id" and any(
+            marker in lowered for marker in ("build", "workflow", "pipeline")
+        ):
+            return _reference(field_name, dependency, "latest_failed_build.id")
+        if field_name == "job_id" and "job" in lowered:
+            return _reference(field_name, dependency, "jobs.0.id")
+        if field_name in {"sha", "head"} and any(
+            marker in lowered for marker in ("build", "commit", "change", "diff")
+        ):
+            output_path = "commits.0.sha" if "commit" in lowered else "latest_failed_build.sha"
+            return _reference(field_name, dependency, output_path)
+    if tool_name in {"rerun_workflow", "rerun_build"} and field_name == "run_id":
+        for dependency in depends_on:
+            return _reference(field_name, dependency, "latest_failed_build.id")
+    return None
+
+
+def _reference(argument: str, source_node_id: str, output_path: str) -> dict[str, str]:
+    return {
+        "argument": argument[:120],
+        "source_node_id": source_node_id[:120],
+        "output_path": _canonical_output_path(output_path)[:240],
+    }
 
 
 def _argument_reference(
@@ -1127,7 +1270,13 @@ def _safe_json_scalar(value: Any) -> bool:
     )
 
 
-def _placeholder_for_field(field_name: str, field_schema: Any) -> object | None:
+def _placeholder_for_field(
+    field_name: str,
+    field_schema: Any,
+    *,
+    allow_demo_defaults: bool = True,
+    reference_target: bool = False,
+) -> object | None:
     if not isinstance(field_schema, dict):
         return None
     expected_type = field_schema.get("type")
@@ -1140,12 +1289,55 @@ def _placeholder_for_field(field_name: str, field_schema: Any) -> object | None:
     if expected_type == "object":
         return {}
     if expected_type == "string":
+        if field_name in {"sha", "head", "base"} and reference_target:
+            return "0000000"
         if field_name == "repository":
-            return "ImmanuelP31/MCP_AI"
+            return _current_repository() or ("ImmanuelP31/MCP_AI" if allow_demo_defaults else None)
         if field_name == "device_id":
-            return "SIM-014"
+            return "SIM-014" if allow_demo_defaults else None
         return "pending-runtime-binding"
     return None
+
+
+def _current_repository() -> str | None:
+    settings = get_settings()
+    if settings.github_owner and settings.github_repo:
+        return f"{settings.github_owner}/{settings.github_repo}"
+    allowed = [
+        item.strip()
+        for item in settings.github_allowed_repositories.split(",")
+        if item.strip()
+    ]
+    return sorted(allowed)[0] if allowed else None
+
+
+def _device_from_request(user_request: str) -> str | None:
+    match = re.search(r"\bSIM-\d{3}\b", user_request, flags=re.IGNORECASE)
+    return match.group(0).upper() if match else None
+
+
+def _service_from_request(user_request: str) -> str | None:
+    for match in re.finditer(r"\b[A-Za-z0-9][A-Za-z0-9_.-]{2,80}\b", user_request):
+        value = match.group(0)
+        if "-" in value and not value.upper().startswith("SIM-"):
+            return value
+    return None
+
+
+def _requires_runtime_binding(field_name: str) -> bool:
+    return field_name in {"run_id", "job_id", "sha", "head", "pull_number", "service_name"}
+
+
+def _is_demo_sentinel_value(field_name: str, value: Any) -> bool:
+    if field_name in {"run_id"} and value == 9001:
+        return True
+    if field_name in {"job_id"} and value == 101:
+        return True
+    if field_name in {"sha", "head", "base"} and value == "abc1234":
+        return True
+    if field_name == "pull_number" and value == 31:
+        return True
+    return False
 
 
 def _first_available(available: dict[str, ToolDocument], *names: str) -> str:
@@ -1209,19 +1401,35 @@ def _planner_payload(
     user_request: str,
     tools: list[ToolDocument],
     role: str,
+    target_environment: str,
     knowledge: list[KnowledgeSearchResult],
 ) -> dict[str, Any]:
+    current_repository = _current_repository()
     return {
         "trusted_task": {
             "user_request": user_request[:2000],
             "role": role,
             "required_output_schema": "PlannerDecision",
-            "current_repository": "ImmanuelP31/MCP_AI",
-            "default_environment": "dev",
+            "current_repository": current_repository,
+            "default_environment": target_environment,
             "semantic_rules": [
-                "latest/current/this repository may use current_repository",
+                "latest/current/this repository may use current_repository when it is present",
                 "high-risk governed actions should be PLAN, not REFUSE",
                 "approval is not a model decision; backend policy handles it",
+                (
+                    "Before selecting nodes, decompose every clause into required information "
+                    "or action, then include a producing node for each required item."
+                ),
+                (
+                    "Do not jump directly to a final lookup when an upstream resource must first "
+                    "be identified. Example: ownership of the service that failed in the latest "
+                    "pipeline requires failed build -> failed job/logs or metadata "
+                    "-> service owner."
+                ),
+                (
+                    "Use dependency references for runtime values discovered by earlier nodes; "
+                    "do not invent run IDs, job IDs, pull numbers, or commit SHAs."
+                ),
             ],
         },
         "allowed_tools": [
@@ -1247,8 +1455,15 @@ def _planner_payload(
         ],
         "dependency_reference_examples": [
             {
+                "producer_node": "latest_failed_build",
+                "producer_output": {"latest_failed_build": {"id": 123, "sha": "abc123def"}},
+                "consumer_argument": {
+                    "run_id": {"$from": "latest_failed_build.latest_failed_build.id"}
+                },
+            },
+            {
                 "producer_node": "failed_jobs",
-                "producer_output": {"jobs": [{"id": 123}]},
+                "producer_output": {"jobs": [{"id": 456}]},
                 "consumer_argument": {"job_id": {"$from": "failed_jobs.jobs.0.id"}},
             },
             {
@@ -1289,8 +1504,10 @@ def _compile_planner_decision_payload(
     planner_model: str,
     user_request: str,
     tools: list[ToolDocument],
+    target_environment: str,
     attempt: int,
 ) -> WorkflowPlanDraft:
+    del target_environment
     try:
         decision = PlannerDecision.model_validate(payload)
     except ValidationError as exc:
@@ -1320,15 +1537,16 @@ def _compile_planner_decision_payload(
             attempt=attempt,
         )
     available = {tool.name: tool for tool in tools}
-    nodes = [
-        _normalize_node(
-            index,
-            proposal.model_dump(mode="json", exclude_none=True),
-            available,
-            user_request,
-        )
-        for index, proposal in enumerate(decision.nodes, start=1)
-    ]
+    nodes = _normalize_nodes_two_pass(
+        [
+            proposal.model_dump(mode="json", exclude_none=True)
+            for proposal in decision.nodes
+        ],
+        available,
+        user_request,
+        allow_demo_defaults=False,
+        attempt=attempt,
+    )
     draft_payload = {
         "user_request": user_request,
         "planner_model": planner_model,
@@ -1370,19 +1588,132 @@ def _normalize_plan_payload(
     }
     raw_nodes = candidate.get("nodes") or candidate.get("steps") or candidate.get("workflow_nodes")
     if isinstance(raw_nodes, list):
-        normalized["nodes"] = [
-            _normalize_node(index, node, available, user_request)
-            for index, node in enumerate(raw_nodes, start=1)
-            if isinstance(node, dict | str)
-        ]
+        normalized["nodes"] = _normalize_nodes_two_pass(
+            [node for node in raw_nodes if isinstance(node, dict | str)],
+            available,
+            user_request,
+            allow_demo_defaults=False,
+            attempt=1,
+        )
     tool_sequence = candidate.get("tool_sequence")
     if not normalized["nodes"] and isinstance(tool_sequence, list):
-        normalized["nodes"] = [
-            _normalize_node(index, str(tool_name), available, user_request)
-            for index, tool_name in enumerate(tool_sequence, start=1)
-        ]
+        normalized["nodes"] = _normalize_nodes_two_pass(
+            [str(tool_name) for tool_name in tool_sequence],
+            available,
+            user_request,
+            allow_demo_defaults=False,
+            attempt=1,
+        )
     normalized["edges"] = _derive_edges_from_nodes(normalized["nodes"])
     return normalized
+
+
+def _normalize_nodes_two_pass(
+    raw_nodes: list[dict[str, Any] | str],
+    available: dict[str, ToolDocument],
+    user_request: str,
+    *,
+    allow_demo_defaults: bool,
+    attempt: int,
+) -> list[dict[str, Any]]:
+    normalized = [
+        _normalize_node(
+            index,
+            node,
+            available,
+            user_request,
+            allow_demo_defaults=allow_demo_defaults,
+        )
+        for index, node in enumerate(raw_nodes, start=1)
+    ]
+    id_map = _node_id_aliases(raw_nodes, normalized)
+    resolved = [_resolve_node_references(node, id_map) for node in normalized]
+    unresolved = _unresolved_node_references(resolved)
+    if unresolved:
+        valid_ids = ", ".join(node["id"] for node in resolved if isinstance(node.get("id"), str))
+        raise PlannerOutputError(
+            "Planner produced dependencies or references to missing node IDs.",
+            stage="schema_validation",
+            reason=f"{'; '.join(unresolved[:4])}. Valid node IDs: {valid_ids}",
+            attempt=attempt,
+        )
+    return resolved
+
+
+def _node_id_aliases(
+    raw_nodes: list[dict[str, Any] | str],
+    normalized_nodes: list[dict[str, Any]],
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for index, (raw_node, node) in enumerate(zip(raw_nodes, normalized_nodes, strict=False)):
+        node_id = str(node.get("id") or "").strip()
+        tool_name = str(node.get("tool_name") or "").strip()
+        if not node_id:
+            continue
+        candidates = {node_id, f"node_{index}", f"node_{index + 1}"}
+        if tool_name:
+            candidates.update({tool_name, f"{tool_name}_node"})
+        if isinstance(raw_node, str):
+            candidates.update({raw_node, f"{raw_node}_node"})
+        elif isinstance(raw_node, dict):
+            for key in ("id", "tool_name", "tool", "tool_id", "name"):
+                raw_value = raw_node.get(key)
+                if isinstance(raw_value, str) and raw_value.strip():
+                    candidates.update({raw_value.strip(), f"{raw_value.strip()}_node"})
+        for candidate in candidates:
+            aliases.setdefault(candidate, node_id)
+    return aliases
+
+
+def _resolve_node_references(node: dict[str, Any], id_map: dict[str, str]) -> dict[str, Any]:
+    node_id = str(node.get("id") or "")
+    depends_on = [
+        resolved
+        for dependency in node.get("depends_on", [])
+        if isinstance(dependency, str)
+        for resolved in [id_map.get(dependency, dependency)]
+        if resolved != node_id
+    ]
+    argument_references = []
+    for reference in node.get("argument_references", []):
+        if not isinstance(reference, dict):
+            continue
+        source = reference.get("source_node_id")
+        if isinstance(source, str):
+            reference = {**reference, "source_node_id": id_map.get(source, source)}
+        argument_references.append(reference)
+    typed_condition = node.get("typed_condition")
+    if isinstance(typed_condition, dict):
+        source = typed_condition.get("source_node_id")
+        if isinstance(source, str):
+            typed_condition = {**typed_condition, "source_node_id": id_map.get(source, source)}
+    return {
+        **node,
+        "depends_on": list(dict.fromkeys(depends_on)),
+        "argument_references": argument_references,
+        "typed_condition": typed_condition,
+    }
+
+
+def _unresolved_node_references(nodes: list[dict[str, Any]]) -> list[str]:
+    node_ids = {str(node.get("id")) for node in nodes if node.get("id")}
+    errors: list[str] = []
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        for dependency in node.get("depends_on", []):
+            if dependency not in node_ids:
+                errors.append(f"{node_id} depends on missing {dependency}")
+        for reference in node.get("argument_references", []):
+            if isinstance(reference, dict) and reference.get("source_node_id") not in node_ids:
+                errors.append(
+                    f"{node_id} argument references missing {reference.get('source_node_id')}"
+                )
+        condition = node.get("typed_condition")
+        if isinstance(condition, dict) and condition.get("source_node_id") not in node_ids:
+            errors.append(
+                f"{node_id} condition references missing {condition.get('source_node_id')}"
+            )
+    return errors
 
 
 def _derive_edges_from_nodes(nodes: list[Any]) -> list[dict[str, str | None]]:
@@ -1433,6 +1764,8 @@ def _normalize_node(
     node: dict[str, Any] | str,
     available: dict[str, ToolDocument],
     user_request: str,
+    *,
+    allow_demo_defaults: bool = True,
 ) -> dict[str, Any]:
     if isinstance(node, str):
         node = {"tool_name": node}
@@ -1456,6 +1789,7 @@ def _normalize_node(
             user_request,
             arguments,
             depends_on=safe_depends_on,
+            allow_demo_defaults=allow_demo_defaults,
         )
         typed_condition = _normalize_typed_condition(
             node.get("typed_condition", node.get("condition")),

@@ -188,7 +188,7 @@ def run_evaluation(
     payload = EvaluationRunResult(
         mode=mode,
         generated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        dataset_path=str(dataset_path),
+        dataset_path=_display_path(dataset_path),
         summaries=summaries,
         cases=[asdict(result) for result in case_results],
     )
@@ -252,6 +252,13 @@ def _dataset_path(dataset_name: str) -> Path:
     if dataset_name == "heldout_adversarial":
         return HELDOUT_ADVERSARIAL_PATH
     raise ValueError(f"Unknown evaluation dataset: {dataset_name}.")
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT.parent.resolve()).as_posix()
+    except ValueError:
+        return path.name
 
 
 def _heldout_item(payload: object) -> BenchmarkItem:
@@ -389,6 +396,7 @@ def _evaluate_case(
     prohibited_attempted = bool(set(actual_tools) & set(item.prohibited_tools))
     approvals_correct = set(actual_approvals) == set(item.required_approvals)
     workflow_completed = workflow_valid and not prohibited_attempted and approvals_correct
+    execution_succeeded = False
     token_usage = 0 if mode == "mock" else _estimate_tokens(item.request, actual_tools)
     cost = None if mode == "mock" else round(token_usage * 0.000002, 6)
     case_result = EvaluationCaseResult(
@@ -405,7 +413,7 @@ def _evaluate_case(
         retrieved_documents=retrieved_documents,
         workflow_valid=workflow_valid,
         workflow_completed=workflow_completed,
-        execution_succeeded=workflow_completed,
+        execution_succeeded=execution_succeeded,
         planner_latency_ms=round(planner_latency_ms, 4),
         end_to_end_latency_ms=round(e2e_latency_ms, 4),
         token_usage=token_usage,
@@ -436,7 +444,7 @@ def _evaluate_case(
         retrieved_documents=retrieved_documents,
         workflow_valid=workflow_valid,
         workflow_completed=workflow_completed,
-        execution_succeeded=workflow_completed,
+        execution_succeeded=execution_succeeded,
         planner_latency_ms=planner_latency_ms,
         end_to_end_latency_ms=e2e_latency_ms,
         token_usage=token_usage,
@@ -532,6 +540,7 @@ def _write_outputs(payload: EvaluationRunResult) -> None:
                 "exact_tool_set_accuracy",
                 "workflow_validity_rate",
                 "workflow_completion_rate",
+                "plan_acceptance_rate",
                 "benchmark_unexpected_tool_rate",
                 "unknown_or_disallowed_tool_rate",
                 "unknown_tool_call_rate",
@@ -543,6 +552,7 @@ def _write_outputs(payload: EvaluationRunResult) -> None:
                 "rag_mrr",
                 "average_workflow_length",
                 "end_to_end_workflow_validity_rate",
+                "end_to_end_plan_acceptance_rate",
                 "end_to_end_execution_success_rate",
                 "planner_latency_ms",
                 "end_to_end_latency_ms",

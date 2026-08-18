@@ -126,6 +126,7 @@ class EngineeringRagService:
             ranked,
             key=lambda item: (-item.combined_score, item.chunk.metadata.stale, item.citation_id),
         )
+        ranked = _dedupe_by_citation(ranked)
         return EngineeringKnowledgeSearchResponse(
             query=request.query,
             mode=request.mode.value,
@@ -170,6 +171,18 @@ def _conflict_group(chunk: KnowledgeChunk) -> str | None:
         ]
         return ":".join(parts)
     return None
+
+
+def _dedupe_by_citation(results: list[KnowledgeSearchResult]) -> list[KnowledgeSearchResult]:
+    selected: dict[str, KnowledgeSearchResult] = {}
+    for result in results:
+        existing = selected.get(result.citation_id)
+        if existing is None or result.combined_score > existing.combined_score:
+            selected[result.citation_id] = result
+    return sorted(
+        selected.values(),
+        key=lambda item: (-item.combined_score, item.chunk.metadata.stale, item.citation_id),
+    )
 
 
 def _index_from_settings(

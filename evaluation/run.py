@@ -49,6 +49,7 @@ def main() -> None:
             "{config}: cases={cases} provider_ok={provider_successful_cases} "
             "provider_success={provider_success_rate:.3f} "
             "quality_valid={workflow_validity_rate:.3f} "
+            "plan_acceptance={plan_acceptance_rate:.3f} "
             "unexpected_tools={benchmark_unexpected_tool_rate:.3f} "
             "unknown_tool_calls={unknown_tool_call_rate:.3f} "
             "rag={rag_recall_at_k:.3f}"

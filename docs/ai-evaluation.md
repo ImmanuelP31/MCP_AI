@@ -37,11 +37,11 @@ requests, distracting tools, policy conflicts, missing information, and multi-in
 
 ## Metrics
 
-Tracked metrics include tool recall, tool precision, exact tool-set accuracy, workflow validity, workflow completion, benchmark-unexpected tool rate, unknown/disallowed tool-call rate, cases with unknown tools, unnecessary tool calls, policy violation attempts, approval classification accuracy, RAG Recall@K, RAG MRR, workflow length, execution success, latency, token usage, and estimated cost when available.
+Tracked metrics include tool recall, tool precision, exact tool-set accuracy, workflow validity, plan acceptance, benchmark-unexpected tool rate, unknown/disallowed tool-call rate, cases with unknown tools, unnecessary tool calls, policy violation attempts, approval classification accuracy, RAG Recall@K, RAG MRR, workflow length, execution success when execution is actually run, latency, token usage, and estimated cost when available.
 
 ## Latest Measured Mock Baseline
 
-| Configuration | Cases | Tool Recall | Tool Precision | Workflow Validity | Unknown/Disallowed Tool Rate | RAG Recall@K | Execution Success |
+| Configuration | Cases | Tool Recall | Tool Precision | Workflow Validity | Unknown/Disallowed Tool Rate | RAG Recall@K | Plan Acceptance |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | all_tools | 330 | 0.5379 | 0.8409 | 0.6545 | 0.2226 | 0.0000 | 0.5455 |
 | semantic | 330 | 0.5015 | 0.8477 | 0.7455 | 0.2016 | 0.0000 | 0.6364 |
@@ -128,28 +128,34 @@ infrastructure/authentication failures and should not be presented as LLM qualit
 
 ## Latest Live Held-Out Measurement
 
-The latest 50-case held-out adversarial run was generated at `2026-08-14T08:21:08Z` with Gemini
-planning, hashing retrieval, and the `semantic_rag_graph` configuration.
+The latest 50-case held-out adversarial run was generated at `2026-08-18T10:42:30Z` with Gemini
+planning, hashing retrieval, and the `semantic_rag_graph` configuration. Hashing retrieval was used
+to isolate planner behavior while avoiding embedding-provider quota limits.
 
 | Metric | Value |
 | --- | ---: |
 | Cases attempted | 50 |
-| Provider-successful cases | 30 |
-| Provider success rate | 0.6000 |
-| Provider-success workflow validity | 0.9000 |
-| End-to-end workflow validity | 0.5400 |
-| Tool recall | 0.3556 |
-| Tool precision | 0.6906 |
-| Benchmark-unexpected tool rate | 0.4694 |
+| Provider-successful cases | 34 |
+| Provider success rate | 0.6800 |
+| Provider-success workflow validity | 0.9118 |
+| Provider-success plan acceptance | 0.8235 |
+| End-to-end workflow validity | 0.6200 |
+| End-to-end plan acceptance | 0.5600 |
+| Tool recall | 0.3358 |
+| Tool precision | 0.3309 |
+| Benchmark-unexpected tool rate | 0.5283 |
 | Unknown/disallowed tool-call rate | 0.0000 |
 | Cases with unknown/disallowed tools | 0.0000 |
-| Approval classification accuracy | 0.8333 |
-| RAG Recall@K | 0.2111 |
-| Provider HTTP 429 failures | 20 |
+| Approval classification accuracy | 0.9118 |
+| RAG Recall@K | 0.2059 |
+| Provider HTTP 429 failures | 16 |
+| Other provider failures | 0 |
 | Planner-output/schema failures | 0 |
+| Workflow-validation failures | 3 |
 
 The earlier `45 / 50 PlannerOutputError` failure mode is no longer reproduced. Remaining work is
 semantic quality and provider availability rather than planner-output contract validity.
+This benchmark did not execute MCP tools, so `execution_success_rate` is intentionally `0.0000`.
 
 ## Verified Live Integration Status
 

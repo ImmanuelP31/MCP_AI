@@ -38,6 +38,7 @@ class EvaluationSummary:
     exact_tool_set_accuracy: float
     workflow_validity_rate: float
     workflow_completion_rate: float
+    plan_acceptance_rate: float
     hallucinated_tool_rate: float
     benchmark_unexpected_tool_rate: float
     unknown_or_disallowed_tool_rate: float
@@ -53,6 +54,7 @@ class EvaluationSummary:
     execution_success_rate: float
     end_to_end_workflow_validity_rate: float
     end_to_end_workflow_completion_rate: float
+    end_to_end_plan_acceptance_rate: float
     end_to_end_execution_success_rate: float
     planner_latency_ms: float
     end_to_end_latency_ms: float
@@ -67,8 +69,14 @@ def recall(expected: set[str], actual: set[str]) -> float:
     return 1.0 if not expected else len(expected & actual) / len(expected)
 
 
-def precision(allowed: set[str], actual: list[str]) -> float:
-    return 1.0 if not actual else len([tool for tool in actual if tool in allowed]) / len(actual)
+def precision(
+    allowed: set[str],
+    actual: list[str],
+    expected: set[str] | None = None,
+) -> float:
+    if not actual:
+        return 0.0 if expected else 1.0
+    return len([tool for tool in actual if tool in allowed]) / len(actual)
 
 
 def exact_tool_set_accuracy(expected: set[str], actual: set[str]) -> float:
@@ -102,6 +110,7 @@ def compute_summary(
             exact_tool_set_accuracy=0.0,
             workflow_validity_rate=0.0,
             workflow_completion_rate=0.0,
+            plan_acceptance_rate=0.0,
             hallucinated_tool_rate=0.0,
             benchmark_unexpected_tool_rate=0.0,
             unknown_or_disallowed_tool_rate=0.0,
@@ -117,6 +126,7 @@ def compute_summary(
             execution_success_rate=0.0,
             end_to_end_workflow_validity_rate=0.0,
             end_to_end_workflow_completion_rate=0.0,
+            end_to_end_plan_acceptance_rate=0.0,
             end_to_end_execution_success_rate=0.0,
             planner_latency_ms=0.0,
             end_to_end_latency_ms=0.0,
@@ -158,7 +168,7 @@ def compute_summary(
         actual = list(dict.fromkeys(item.actual_tools))
         actual_set = set(actual)
         tool_recall_total += recall(expected, actual_set)
-        tool_precision_total += precision(allowed, actual)
+        tool_precision_total += precision(allowed, actual, expected)
         exact_total += exact_tool_set_accuracy(expected, actual_set)
         valid_total += int(item.workflow_valid)
         completed_total += int(item.workflow_completed)
@@ -201,6 +211,7 @@ def compute_summary(
         exact_tool_set_accuracy=_round(exact_total / denominator),
         workflow_validity_rate=_round(valid_total / denominator),
         workflow_completion_rate=_round(completed_total / denominator),
+        plan_acceptance_rate=_round(completed_total / denominator),
         hallucinated_tool_rate=unknown_tool_call_rate,
         benchmark_unexpected_tool_rate=benchmark_unexpected_rate,
         unknown_or_disallowed_tool_rate=unknown_tool_call_rate,
@@ -216,6 +227,7 @@ def compute_summary(
         execution_success_rate=_round(execution_success_total / denominator),
         end_to_end_workflow_validity_rate=_round(end_to_end_valid_total / cases),
         end_to_end_workflow_completion_rate=_round(end_to_end_completed_total / cases),
+        end_to_end_plan_acceptance_rate=_round(end_to_end_completed_total / cases),
         end_to_end_execution_success_rate=_round(end_to_end_execution_success_total / cases),
         planner_latency_ms=_round(planner_latency_total / denominator),
         end_to_end_latency_ms=_round(e2e_latency_total / denominator),

@@ -891,6 +891,7 @@ interface EvaluationSummary {
   exact_tool_set_accuracy: number;
   workflow_validity_rate: number;
   workflow_completion_rate: number;
+  plan_acceptance_rate?: number;
   hallucinated_tool_rate: number;
   benchmark_unexpected_tool_rate?: number;
   unknown_or_disallowed_tool_rate?: number;
@@ -906,6 +907,7 @@ interface EvaluationSummary {
   execution_success_rate: number;
   end_to_end_workflow_validity_rate?: number;
   end_to_end_execution_success_rate?: number;
+  end_to_end_plan_acceptance_rate?: number;
   planner_latency_ms: number;
   end_to_end_latency_ms: number;
   token_usage: number;
@@ -1660,6 +1662,7 @@ function EvaluationPage() {
   const providerSuccessfulCases = latest.provider_successful_cases ?? latest.cases;
   const endToEndValidity =
     latest.end_to_end_workflow_validity_rate ?? latest.workflow_validity_rate;
+  const planAcceptance = latest.plan_acceptance_rate ?? latest.workflow_completion_rate;
   return (
     <div className="page-stack">
       <Section title="AI workflow evaluation" icon={BarChart3}>
@@ -1673,6 +1676,7 @@ function EvaluationPage() {
           <div className="command-grid">
             <MetricTile label="Provider success" value={formatScore(providerSuccessRate)} icon={Activity} accent="success" />
             <MetricTile label="Quality validity" value={formatScore(latest.workflow_validity_rate)} icon={Check} accent="success" />
+            <MetricTile label="Plan accepted" value={formatScore(planAcceptance)} icon={ClipboardCheck} accent="success" />
             <MetricTile label="E2E validity" value={formatScore(endToEndValidity)} icon={Gauge} accent="neutral" />
             <MetricTile label="Unexpected tools" value={formatScore(unexpectedToolRate)} icon={AlertTriangle} accent="warning" />
             <MetricTile label="Unknown calls" value={formatScore(unknownToolCallRate)} icon={ShieldCheck} accent="danger" />
@@ -1690,7 +1694,7 @@ function EvaluationPage() {
                   <th>Config</th>
                   <th>Provider</th>
                   <th>Validity</th>
-                  <th>Completion</th>
+                  <th>Plan accepted</th>
                   <th>Tool F1 inputs</th>
                   <th>Unexpected</th>
                   <th>Unknown calls</th>
@@ -1708,7 +1712,9 @@ function EvaluationPage() {
                       {summary.provider_successful_cases ?? summary.cases}/{summary.cases}
                     </td>
                     <td>{formatScore(summary.workflow_validity_rate)}</td>
-                    <td>{formatScore(summary.workflow_completion_rate)}</td>
+                    <td>
+                      {formatScore(summary.plan_acceptance_rate ?? summary.workflow_completion_rate)}
+                    </td>
                     <td>
                       {formatScore(summary.tool_recall)} / {formatScore(summary.tool_precision)}
                     </td>
@@ -1732,7 +1738,8 @@ function EvaluationPage() {
             </table>
           </div>
           <p className="muted-text">
-            Planner quality metrics use provider-successful cases only. End-to-end validity includes
+            Planner quality metrics use provider-successful cases only. Plan acceptance is not tool
+            execution success unless an evaluation run executes the workflow. End-to-end validity includes
             provider availability failures. Provider-successful cases: {providerSuccessfulCases}/{latest.cases}.
           </p>
         </div>
