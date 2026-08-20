@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from hmac import compare_digest
+from typing import Annotated, Any
+from uuid import UUID
+
+from fastapi import Body, FastAPI, Header, HTTPException
 from mcp_ops_api.db.session import create_database_engine, create_session_factory
 from mcp_ops_common.config import get_settings
 from mcp_ops_observability.fastapi import add_observability
 from mcp_ops_observability.logging import configure_logging
 
 from mcp_ops_mcp_gateway.auth import HmacJwtAuthenticator
+from mcp_ops_mcp_gateway.models import GatewayToolRequest, GatewayToolResponse
 from mcp_ops_mcp_gateway.persistence import (
     SqlAlchemyApprovalStore,
     SqlAlchemyAuditLog,
@@ -62,7 +67,37 @@ def create_app(gateway: McpGateway | None = None) -> FastAPI:
             },
         }
 
+    @app.post(
+        "/api/v1/gateway/tools/call",
+        response_model=GatewayToolResponse,
+        tags=["gateway"],
+    )
+    def call_tool(
+        request_payload: Annotated[dict[str, Any], Body()],
+        x_service_token: Annotated[str | None, Header()] = None,
+    ) -> GatewayToolResponse:
+        _authorize_service(settings, x_service_token)
+        request = _request_from_json(request_payload)
+        return gateway_obj.call_tool(request)
+
     return app
+
+
+def _authorize_service(settings: Any, token: str | None) -> None:
+    expected = settings.service_auth_shared_secret
+    if not token or not expected or not compare_digest(token, expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid MCP gateway service credentials.",
+        )
+
+
+def _request_from_json(payload: dict[str, Any]) -> GatewayToolRequest:
+    coerced = dict(payload)
+    for key in ("approval_id", "correlation_id", "workflow_id"):
+        if isinstance(coerced.get(key), str):
+            coerced[key] = UUID(coerced[key])
+    return GatewayToolRequest.model_validate(coerced)
 
 
 app = create_app()

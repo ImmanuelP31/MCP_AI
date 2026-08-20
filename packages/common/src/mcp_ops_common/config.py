@@ -56,6 +56,10 @@ class Settings(BaseSettings):
 
     service_auth_shared_secret: str = Field(default="change-me-local-only", repr=False)
     approval_ttl_seconds: int = 3600
+    mcp_gateway_url: str = "http://localhost:8002"
+    mcp_gateway_timeout_seconds: int = 10
+    mcp_gateway_transport_retries: int = 1
+    mcp_gateway_client_mode: str = "auto"
 
     llm_provider: str = "deterministic"
     openai_api_key: str = Field(default="", repr=False)

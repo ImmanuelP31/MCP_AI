@@ -7,7 +7,7 @@ from mcp_ops_mcp_gateway.models import GatewayDecision, GatewayToolRequest, Gate
 from mcp_ops_observability.metrics import record_agent_decision, record_agent_tool_failure
 from mcp_ops_policy.security import detect_prompt_injection, wrap_untrusted_tool_output
 
-from mcp_ops_ai_agent.gateway import GatewayClient, McpGatewayClient
+from mcp_ops_ai_agent.gateway import GatewayClient, gateway_client_from_settings
 from mcp_ops_ai_agent.models import (
     AgentIntent,
     AgentResponse,
@@ -34,7 +34,7 @@ class AiEngineeringAgent:
         diagnostic_auth_token: str = DEFAULT_DIAGNOSTIC_AUTH_TOKEN,
         operation_auth_token: str = DEFAULT_OPERATION_AUTH_TOKEN,
     ) -> None:
-        self.gateway_client = gateway_client or McpGatewayClient()
+        self.gateway_client = gateway_client or gateway_client_from_settings()
         self.provider = provider or DeterministicMockProvider()
         self.router = router or ToolSelectionPolicy()
         self.diagnostic_auth_token = diagnostic_auth_token

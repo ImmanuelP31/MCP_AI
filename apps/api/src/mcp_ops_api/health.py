@@ -30,6 +30,7 @@ def readiness_checks(settings: Settings) -> dict[str, Any]:
         _tcp_url("redis", settings.redis_url),
         _tcp_host_port("kafka", settings.kafka_bootstrap_servers),
         _http("opensearch", settings.opensearch_url),
+        _http_path("mcp_gateway", settings.mcp_gateway_url, "/ready"),
         _mcp_server("device-mcp", "mcp_ops_device_mcp.server"),
         _mcp_server("diagnostics-mcp", "mcp_ops_diagnostics_mcp.server"),
         _mcp_server("knowledge-mcp", "mcp_ops_knowledge_mcp.server"),
@@ -84,13 +85,17 @@ def _tcp_socket(name: str, host: str, port: int) -> ComponentCheck:
 
 
 def _http(name: str, url: str) -> ComponentCheck:
+    return _http_path(name, url, "/_cluster/health")
+
+
+def _http_path(name: str, url: str, default_path: str) -> ComponentCheck:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return ComponentCheck(name, "misconfigured", {"url": url})
     connection_cls = HTTPSConnection if parsed.scheme == "https" else HTTPConnection
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     path_prefix = parsed.path.rstrip("/")
-    health_path = f"{path_prefix}/_cluster/health" if path_prefix else "/_cluster/health"
+    health_path = f"{path_prefix}{default_path}" if path_prefix else default_path
     try:
         connection = connection_cls(parsed.hostname, port, timeout=0.75)
         try:

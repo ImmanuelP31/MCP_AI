@@ -19,6 +19,7 @@ from mcp_ops_ai_agent.engineering_rag.models import (
     KnowledgeSearchMode,
 )
 from mcp_ops_ai_agent.evaluation import evaluate_agent
+from mcp_ops_ai_agent.gateway import gateway_client_from_settings
 from mcp_ops_ai_agent.provider import DeterministicMockProvider, GeminiChatProvider
 from mcp_ops_ai_agent.service import AiEngineeringAgent
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService, evaluate_tool_discovery
@@ -44,7 +45,8 @@ provider = (
     if settings.llm_provider.lower() == "gemini"
     else DeterministicMockProvider()
 )
-agent = AiEngineeringAgent(provider=provider)
+gateway_client = gateway_client_from_settings(settings)
+agent = AiEngineeringAgent(provider=provider, gateway_client=gateway_client)
 tool_discovery = ToolDiscoveryService()
 capability_graph = CapabilityGraphService()
 engineering_rag = EngineeringRagService()
@@ -72,6 +74,7 @@ workflow_service = WorkflowPlanningService(
     rag=engineering_rag,
     planner=workflow_planner_from_settings(settings),
     repository=workflow_repository,
+    gateway_client=gateway_client,
 )
 
 app = FastAPI(

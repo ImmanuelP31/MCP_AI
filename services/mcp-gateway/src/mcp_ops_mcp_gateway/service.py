@@ -37,6 +37,7 @@ from mcp_ops_mcp_gateway.errors import (
     DisabledTool,
     GatewayError,
     MalformedArguments,
+    NonExecutableTool,
     ToolTimeout,
     UnknownTool,
 )
@@ -129,6 +130,7 @@ class McpGateway:
                 principal = self.authenticator.authenticate(request.auth_token)
                 metadata = self._metadata(request.tool_name)
                 self._check_tool_enabled(metadata)
+                self._check_tool_executable(metadata)
                 self.authorizer.authorize(principal, metadata.required_permission)
                 self.rate_limiter.check(principal, metadata.tool_name, metadata.rate_limit, now)
 
@@ -365,13 +367,12 @@ class McpGateway:
             raise UnknownTool(f"Unknown tool {tool_name}.") from exc
 
     def _check_tool_enabled(self, metadata: ToolMetadata) -> None:
-        tool_is_disabled = (
-            metadata.tool_name in self.disabled_tools
-            or not metadata.enabled
-            or not metadata.executable
-        )
-        if tool_is_disabled:
+        if metadata.tool_name in self.disabled_tools or not metadata.enabled:
             raise DisabledTool(f"Tool {metadata.tool_name} is disabled.")
+
+    def _check_tool_executable(self, metadata: ToolMetadata) -> None:
+        if not metadata.executable:
+            raise NonExecutableTool(f"Tool {metadata.tool_name} is not executable.")
 
     def _approval_for_request(
         self,

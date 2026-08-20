@@ -18,6 +18,10 @@ class DisabledTool(GatewayError):
     code = "tool_disabled"
 
 
+class NonExecutableTool(GatewayError):
+    code = "tool_not_executable"
+
+
 class PermissionDenied(GatewayError):
     code = "permission_denied"
 

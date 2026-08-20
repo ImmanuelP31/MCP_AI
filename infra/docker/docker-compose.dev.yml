@@ -14,6 +14,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       OPENSEARCH_URL: http://opensearch:9200
+      MCP_GATEWAY_URL: http://mcp-gateway:8002
+      MCP_GATEWAY_CLIENT_MODE: remote
+      MCP_GATEWAY_TIMEOUT_SECONDS: ${MCP_GATEWAY_TIMEOUT_SECONDS:-10}
+      MCP_GATEWAY_TRANSPORT_RETRIES: ${MCP_GATEWAY_TRANSPORT_RETRIES:-1}
+      SERVICE_AUTH_SHARED_SECRET: ${SERVICE_AUTH_SHARED_SECRET:-change-me-local-only}
       LLM_PROVIDER: ${LLM_PROVIDER:-deterministic}
       LLM_PLANNER_PROVIDER: ${LLM_PLANNER_PROVIDER:-deterministic}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hashing}
@@ -95,6 +100,7 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       REDIS_URL: redis://redis:6379/0
+      SERVICE_AUTH_SHARED_SECRET: ${SERVICE_AUTH_SHARED_SECRET:-change-me-local-only}
     ports:
       - "8002:8002"
     depends_on:

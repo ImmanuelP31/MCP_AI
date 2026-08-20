@@ -26,7 +26,7 @@ from mcp_ops_ai_agent.engineering_rag.models import (
     KnowledgeFilters,
     KnowledgeSearchMode,
 )
-from mcp_ops_ai_agent.gateway import GatewayClient, McpGatewayClient
+from mcp_ops_ai_agent.gateway import GatewayClient, gateway_client_from_settings
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService
 from mcp_ops_ai_agent.tool_discovery.models import ToolDocument
 from mcp_ops_ai_agent.workflows.arguments import (
@@ -100,7 +100,7 @@ class WorkflowPlanningService:
         self.use_rag = use_rag
         self.use_capability_graph = use_capability_graph
         self.repository = repository or InMemoryWorkflowRepository()
-        self.gateway_client = gateway_client or McpGatewayClient()
+        self.gateway_client = gateway_client or gateway_client_from_settings()
         self.event_publisher = event_publisher or InMemoryWorkflowEventPublisher()
 
     def plan(self, request: WorkflowPlanRequest) -> WorkflowPlanResult:
@@ -855,13 +855,6 @@ class WorkflowPlanningService:
         return self.repository.save_workflow(cancelled)
 
     def _execute_node(self, node: WorkflowNode, role: str) -> GatewayToolResponse:
-        metadata = TOOL_REGISTRY.get(node.tool_name)
-        if (
-            metadata is not None
-            and not metadata.executable
-            and isinstance(self.gateway_client, McpGatewayClient)
-        ):
-            return _denied_response(node, "tool_not_executable")
         return self.gateway_client.call_tool(
             GatewayToolRequest(
                 auth_token=_role_token(role),
