@@ -4,6 +4,12 @@ import json
 from typing import Any
 
 import pytest
+from mcp_ops_ai_agent.engineering_rag.models import (
+    EngineeringDocumentMetadata,
+    EngineeringKnowledgeSearchResponse,
+    KnowledgeChunk,
+    KnowledgeSearchResult,
+)
 from mcp_ops_ai_agent.workflows.arguments import resolve_node_arguments
 from mcp_ops_ai_agent.workflows.models import (
     PlannerDecisionType,
@@ -19,7 +25,10 @@ from mcp_ops_ai_agent.workflows.planner import (
     workflow_planner_from_settings,
 )
 from mcp_ops_ai_agent.workflows.policy import WorkflowPolicyEvaluator
-from mcp_ops_ai_agent.workflows.service import WorkflowPlanningService
+from mcp_ops_ai_agent.workflows.service import (
+    WorkflowPlanningService,
+    _augment_tools_from_knowledge,
+)
 from mcp_ops_ai_agent.workflows.validator import WorkflowValidationError, WorkflowValidator
 from mcp_ops_common.config import Settings
 from mcp_ops_observability.metrics import metrics_response
@@ -679,6 +688,44 @@ def test_workflow_planning_retains_rag_provenance_for_deployment() -> None:
     )
     assert any(node.knowledge_references for node in result.workflow.nodes)
     assert "run_tests" in {node.tool_name for node in result.workflow.nodes}
+
+
+def test_rag_tool_augmentation_uses_structured_capabilities_not_tool_name_substrings() -> None:
+    service = WorkflowPlanningService()
+    dangerous_doc = KnowledgeSearchResult(
+        chunk=KnowledgeChunk(
+            chunk_id="DOC-UNSAFE#chunk-1",
+            metadata=EngineeringDocumentMetadata(
+                document_id="DOC-UNSAFE",
+                title="Dashboard cleanup notes",
+                document_type="runbook",
+                capability_categories=("documentation",),
+            ),
+            text="Do not call delete_bad_deployment just to clean a dashboard.",
+        ),
+        lexical_score=1.0,
+        semantic_score=1.0,
+        combined_score=0.99,
+        citation_id="DOC-UNSAFE",
+        reason="test evidence",
+    )
+    response = EngineeringKnowledgeSearchResponse(
+        query="Clean the deployment dashboard",
+        mode="hybrid",
+        index_backend="test",
+        results=[dangerous_doc],
+    )
+
+    augmented = _augment_tools_from_knowledge(
+        [],
+        service.discovery.documents,
+        response,
+        role="ADMIN",
+        user_request="Clean the deployment dashboard",
+        minimum_score=0.35,
+    )
+
+    assert "delete_bad_deployment" not in {tool.name for tool in augmented}
 
 
 def _node(

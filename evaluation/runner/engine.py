@@ -102,7 +102,7 @@ class AllToolsDiscovery:
         *,
         role: str = "ENGINEER",
         top_k: int = 50,
-        minimum_score: float = 0.0,
+        minimum_score: float | None = None,
         allowed_servers: set[str] | None = None,
         allowed_categories: set[str] | None = None,
     ) -> ToolDiscoveryResponse:
@@ -341,7 +341,9 @@ def _evaluate_case(
                 role=item.role,
                 created_by="evaluation-runner",
                 target_environment=item.environment,
-                top_k=50 if config.use_all_tools else 12,
+                top_k=50
+                if config.use_all_tools
+                else get_settings().workflow_planner_tool_top_k,
             )
         )
         workflow_valid = result.ok

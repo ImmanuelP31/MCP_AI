@@ -31,7 +31,12 @@ from mcp_ops_ai_agent.tool_discovery.models import (
     ToolDiscoveryResult,
     ToolDocument,
 )
-from mcp_ops_ai_agent.tool_discovery.retrieval import combined_score, explanation
+from mcp_ops_ai_agent.tool_discovery.retrieval import (
+    combined_score,
+    explanation,
+    lexical_score,
+    metadata_score,
+)
 
 
 class ToolMetadataError(ValueError):
@@ -67,7 +72,7 @@ class ToolDiscoveryService:
         *,
         role: str = "ENGINEER",
         top_k: int = 8,
-        minimum_score: float = 0.0,
+        minimum_score: float | None = None,
         allowed_servers: set[str] | None = None,
         allowed_categories: set[str] | None = None,
     ) -> ToolDiscoveryResponse:
@@ -75,7 +80,7 @@ class ToolDiscoveryService:
             query=query,
             role=role,
             top_k=_top_k(top_k),
-            minimum_score=max(0.0, minimum_score),
+            minimum_score=_minimum_score(minimum_score, self.settings),
             filters=ToolDiscoveryFilters(
                 allowed_servers=frozenset(allowed_servers or set()),
                 allowed_categories=frozenset(allowed_categories or set()),
@@ -103,9 +108,13 @@ class ToolDiscoveryService:
         query: str,
         *,
         role: str,
-        top_k: int = 12,
+        top_k: int | None = None,
     ) -> list[ToolDocument]:
-        response = self.retrieve(query, role=role, top_k=top_k)
+        response = self.retrieve(
+            query,
+            role=role,
+            top_k=top_k or self.settings.workflow_planner_tool_top_k,
+        )
         return [result.tool for result in response.ranked_tools]
 
     def _retrieve_with_index(
@@ -123,11 +132,26 @@ class ToolDiscoveryService:
         )
         semantic_by_name = {match.tool_name: match.semantic_score for match in semantic_matches}
         document_by_name = {document.name: document for document in self.documents}
+        candidate_names = set(semantic_by_name)
+        candidate_names.update(
+            document.name
+            for document in self.documents
+            if _matches_filters(document, request.filters)
+            and _lexical_or_metadata_candidate(request.query, document)
+        )
         ranked: list[ToolDiscoveryResult] = []
         unauthorized = 0
-        for tool_name, semantic_score in semantic_by_name.items():
+        for tool_name in candidate_names:
             document = document_by_name[tool_name]
-            lexical, score = combined_score(request.query, document, semantic_score)
+            semantic_score = semantic_by_name.get(tool_name, 0.0)
+            lexical, score = combined_score(
+                request.query,
+                document,
+                semantic_score,
+                semantic_weight=self.settings.tool_discovery_semantic_weight,
+                lexical_weight=self.settings.tool_discovery_lexical_weight,
+                metadata_weight=self.settings.tool_discovery_metadata_weight,
+            )
             if score < request.minimum_score:
                 continue
             if not _role_authorized(request.role, document):
@@ -234,6 +258,24 @@ def _role_authorized(role: str, document: ToolDocument) -> bool:
 
 def _top_k(value: int) -> int:
     return min(max(value, 1), 50)
+
+
+def _minimum_score(value: float | None, settings: Settings) -> float:
+    if value is None:
+        value = settings.tool_discovery_minimum_score
+    return min(max(value, 0.0), 1.0)
+
+
+def _lexical_or_metadata_candidate(query: str, document: ToolDocument) -> bool:
+    return lexical_score(query, document) > 0.0 or metadata_score(query, document) > 0.0
+
+
+def _matches_filters(document: ToolDocument, filters: ToolDiscoveryFilters) -> bool:
+    if filters.allowed_servers and document.server not in filters.allowed_servers:
+        return False
+    if filters.allowed_categories and document.category not in filters.allowed_categories:
+        return False
+    return True
 
 
 def _index_from_settings(

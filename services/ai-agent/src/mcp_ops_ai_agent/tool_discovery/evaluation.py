@@ -41,6 +41,9 @@ def evaluate_tool_discovery(
 ) -> BenchmarkResult:
     benchmark_cases = cases or load_benchmark_cases()
     recall_total = 0.0
+    recall_at_1_total = 0.0
+    recall_at_3_total = 0.0
+    recall_at_5_total = 0.0
     precision_total = 0.0
     reciprocal_rank_total = 0.0
 
@@ -50,6 +53,9 @@ def evaluate_tool_discovery(
         expected = set(case.expected_tools)
         hits = [tool for tool in actual if tool in expected]
         recall_total += len(hits) / len(expected) if expected else 0.0
+        recall_at_1_total += _recall_at(actual, expected, 1)
+        recall_at_3_total += _recall_at(actual, expected, 3)
+        recall_at_5_total += _recall_at(actual, expected, 5)
         precision_total += len(hits) / top_k if top_k else 0.0
         reciprocal_rank_total += _reciprocal_rank(actual, expected)
 
@@ -59,7 +65,16 @@ def evaluate_tool_discovery(
         recall_at_k=_ratio(recall_total, count),
         precision_at_k=_ratio(precision_total, count),
         mrr=_ratio(reciprocal_rank_total, count),
+        recall_at_1=_ratio(recall_at_1_total, count),
+        recall_at_3=_ratio(recall_at_3_total, count),
+        recall_at_5=_ratio(recall_at_5_total, count),
     )
+
+
+def _recall_at(actual: list[str], expected: set[str], k: int) -> float:
+    if not expected:
+        return 0.0
+    return len([tool for tool in actual[:k] if tool in expected]) / len(expected)
 
 
 def _reciprocal_rank(actual: list[str], expected: set[str]) -> float:

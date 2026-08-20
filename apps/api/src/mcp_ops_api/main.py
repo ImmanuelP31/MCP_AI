@@ -149,7 +149,7 @@ class AgentEvaluationResponse(StrictModel):
 class ToolDiscoveryRequest(StrictModel):
     query: str = Field(min_length=2, max_length=2000)
     top_k: int = Field(default=8, ge=1, le=50)
-    minimum_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_score: float | None = Field(default=None, ge=0.0, le=1.0)
     role: Role = Role.ENGINEER
     allowed_servers: list[str] = Field(default_factory=list, max_length=20)
     allowed_categories: list[str] = Field(default_factory=list, max_length=20)
@@ -168,6 +168,9 @@ class ToolDiscoveryEvaluationResponse(StrictModel):
     recall_at_k: float
     precision_at_k: float
     mrr: float
+    recall_at_1: float
+    recall_at_3: float
+    recall_at_5: float
 
 
 class WorkflowPlanApiRequest(StrictModel):
@@ -199,7 +202,7 @@ class KnowledgeSearchApiRequest(StrictModel):
     query: str = Field(min_length=2, max_length=2000)
     top_k: int = Field(default=5, ge=1, le=20)
     mode: str = Field(default="hybrid", pattern="^(bm25|vector|hybrid)$")
-    minimum_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_score: float | None = Field(default=None, ge=0.0, le=1.0)
     document_type: str | None = Field(default=None, max_length=80)
     service: str | None = Field(default=None, max_length=120)
     repository: str | None = Field(default=None, max_length=120)
@@ -381,7 +384,7 @@ def engineering_knowledge_search(request: KnowledgeSearchApiRequest) -> dict[str
             query=request.query,
             top_k=request.top_k,
             mode=KnowledgeSearchMode(request.mode),
-            minimum_score=request.minimum_score,
+            minimum_score=request.minimum_score if request.minimum_score is not None else 0.0,
             filters=KnowledgeFilters(
                 document_type=request.document_type,
                 service=request.service,

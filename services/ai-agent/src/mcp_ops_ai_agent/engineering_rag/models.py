@@ -25,6 +25,7 @@ class EngineeringDocumentMetadata:
     source: str = "synthetic-engineering-corpus"
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     stale: bool = False
+    capability_categories: tuple[str, ...] = ()
 
     def as_payload(self) -> dict[str, Any]:
         return {
@@ -39,6 +40,7 @@ class EngineeringDocumentMetadata:
             "source": self.source,
             "updated_at": self.updated_at.isoformat(),
             "stale": self.stale,
+            "capability_categories": list(self.capability_categories),
         }
 
 
@@ -68,6 +70,7 @@ class KnowledgeChunk:
             self.metadata.environment or "",
             self.metadata.owner or "",
             self.metadata.version,
+            " ".join(self.metadata.capability_categories),
             self.text,
         ]
         return " ".join(parts)

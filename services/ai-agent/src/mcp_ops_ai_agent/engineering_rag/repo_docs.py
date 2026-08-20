@@ -95,6 +95,7 @@ def _metadata_for(path: Path, root: Path) -> EngineeringDocumentMetadata:
         version="workspace",
         source=f"local-repository:{relative}",
         updated_at=updated_at,
+        capability_categories=_capability_categories_for(relative, document_type),
     )
 
 
@@ -139,6 +140,26 @@ def _environment_for(relative: str) -> str | None:
     if "github" in normalized or "ci" in normalized or "workflow" in normalized:
         return "dev"
     return None
+
+
+def _capability_categories_for(relative: str, document_type: str) -> tuple[str, ...]:
+    normalized = relative.lower()
+    categories: set[str] = {"documentation"}
+    if document_type in {"cicd_workflow", "workflow"} or ".github/workflows/" in normalized:
+        categories.update({"cicd", "testing", "repository"})
+    if "deploy" in normalized or "deployment" in normalized:
+        categories.add("deployment")
+    if "approval" in normalized:
+        categories.add("approval")
+    if "security" in normalized or "threat-model" in normalized:
+        categories.add("policy")
+    if "evaluation" in normalized:
+        categories.add("evaluation")
+    if "demo" in normalized:
+        categories.add("run_instructions")
+    if "architecture" in normalized:
+        categories.add("architecture")
+    return tuple(sorted(categories))
 
 
 def _format_for(path: Path) -> str:

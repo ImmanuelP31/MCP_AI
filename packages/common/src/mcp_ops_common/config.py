@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     tool_discovery_index_backend: str = "memory"
     knowledge_index_backend: str = "memory"
     rag_include_repository_docs: bool = True
+    tool_discovery_semantic_weight: float = 0.45
+    tool_discovery_lexical_weight: float = 0.45
+    tool_discovery_metadata_weight: float = 1.0
+    tool_discovery_minimum_score: float = 0.12
+    workflow_planner_tool_top_k: int = 8
+    workflow_rag_tool_augmentation_min_score: float = 0.35
 
     github_token: str = Field(default="", repr=False)
     github_owner: str = ""

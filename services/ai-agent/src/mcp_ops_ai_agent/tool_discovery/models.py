@@ -118,6 +118,9 @@ class BenchmarkResult:
     recall_at_k: float
     precision_at_k: float
     mrr: float
+    recall_at_1: float = 0.0
+    recall_at_3: float = 0.0
+    recall_at_5: float = 0.0
 
     def as_payload(self) -> dict[str, float | int]:
         return {
@@ -125,4 +128,7 @@ class BenchmarkResult:
             "recall_at_k": self.recall_at_k,
             "precision_at_k": self.precision_at_k,
             "mrr": self.mrr,
+            "recall_at_1": self.recall_at_1,
+            "recall_at_3": self.recall_at_3,
+            "recall_at_5": self.recall_at_5,
         }

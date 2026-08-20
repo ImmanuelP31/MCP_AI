@@ -144,6 +144,11 @@ def metadata_from_mapping(payload: dict[str, Any]) -> EngineeringDocumentMetadat
             source=str(payload.get("source", "ingested")),
             updated_at=updated_at,
             stale=bool(payload.get("stale", False)),
+            capability_categories=tuple(
+                str(item)
+                for item in payload.get("capability_categories", [])
+                if isinstance(item, str)
+            ),
         )
     except KeyError as exc:
         raise RagIngestionError(f"missing metadata field: {exc.args[0]}") from exc

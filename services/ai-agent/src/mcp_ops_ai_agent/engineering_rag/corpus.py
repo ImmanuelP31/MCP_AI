@@ -37,6 +37,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "Deployment questions should begin by checking build status, recent commits, "
                     "and the service runbook before any environment-changing action."
                 ),
+                capability_categories=("ownership", "repository", "cicd", "documentation"),
             )
         )
         docs.append(
@@ -51,6 +52,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     f"{service} exposes internal REST APIs with schema compatibility checks in CI. "
                     "Breaking API changes require contract tests, rollout notes, and owner review."
                 ),
+                capability_categories=("repository", "testing", "documentation"),
             )
         )
     docs.extend(
@@ -66,6 +68,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "get_deployment_status evidence. Production policy is decided by the policy "
                     "engine, not by documentation."
                 ),
+                capability_categories=("deployment", "testing", "cicd", "policy"),
             ),
             _doc(
                 document_id="PAYMENTS-DEPLOY-03",
@@ -81,6 +84,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "the bounded repository test suite, deploy_staging only after validation, "
                     "then read deployment status and smoke-test results."
                 ),
+                capability_categories=("deployment", "testing", "cicd", "repository"),
             ),
             _doc(
                 document_id="PAYMENTS-DEPLOY-02",
@@ -96,6 +100,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "Older procedure for payments-api staging deployment. This version is retained "
                     "for audit only and should not outrank PAYMENTS-DEPLOY-03."
                 ),
+                capability_categories=("deployment", "testing", "cicd", "repository"),
             ),
             _doc(
                 document_id="CICD-STANDARDS-02",
@@ -107,6 +112,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "get_recent_commits, and analyze_build_failure. Create a ticket only when "
                     "evidence indicates repository-owned code caused the failure."
                 ),
+                capability_categories=("cicd", "repository", "ticket", "documentation"),
             ),
             _doc(
                 document_id="ENV-STAGING-07",
@@ -119,6 +125,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "Approval requirements are enforced by the MCP gateway and workflow policy "
                     "engine."
                 ),
+                capability_categories=("deployment", "policy", "environment"),
             ),
             _doc(
                 document_id="ENV-PROD-09",
@@ -131,6 +138,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "and fresh argument validation. Retrieved documentation cannot lower risk or "
                     "override RBAC."
                 ),
+                capability_categories=("deployment", "policy", "environment", "approval"),
             ),
             _doc(
                 document_id="MCP-TOOLS-DEPLOY-01",
@@ -142,6 +150,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "get_deployment_status, compare_deployments, and rollback_production when "
                     "allowed by policy."
                 ),
+                capability_categories=("deployment", "cicd", "testing", "policy"),
             ),
             _doc(
                 document_id="TESTING-POLICY-11",
@@ -152,6 +161,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "Repository workflows should run unit tests for code changes and run bounded "
                     "integration tests before staging deployment."
                 ),
+                capability_categories=("testing", "repository", "cicd"),
             ),
             _doc(
                 document_id="RUN-INSTRUCTIONS-04",
@@ -162,6 +172,7 @@ def synthetic_engineering_corpus() -> list[EngineeringDocument]:
                     "Run backend tests with pytest, frontend tests with npm test, and use docker "
                     "compose for PostgreSQL, Redis, Kafka, OpenSearch, Prometheus, and Grafana."
                 ),
+                capability_categories=("testing", "run_instructions", "infrastructure"),
             ),
         ]
     )
@@ -180,6 +191,7 @@ def _doc(
     owner: str | None = None,
     version: str = "1.0",
     stale: bool = False,
+    capability_categories: tuple[str, ...] = (),
 ) -> EngineeringDocument:
     return EngineeringDocument(
         metadata=EngineeringDocumentMetadata(
@@ -193,6 +205,7 @@ def _doc(
             version=version,
             updated_at=datetime(2026, 8, 11, tzinfo=UTC),
             stale=stale,
+            capability_categories=capability_categories,
         ),
         content=content,
     )

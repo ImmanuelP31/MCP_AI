@@ -51,10 +51,18 @@ def combined_score(
     query: str,
     document: ToolDocument,
     semantic_score: float,
+    *,
+    semantic_weight: float = 0.5,
+    lexical_weight: float = 0.4,
+    metadata_weight: float = 1.0,
 ) -> tuple[float, float]:
     lexical = lexical_score(query, document)
     metadata = metadata_score(query, document)
-    combined = semantic_score * 0.5 + lexical * 0.4 + metadata
+    combined = (
+        semantic_score * semantic_weight
+        + lexical * lexical_weight
+        + metadata * metadata_weight
+    )
     query_terms = set(tokenize(query))
     investigative_terms = {"why", "what", "show", "find", "inspect", "retrieve", "status", "failed"}
     if query_terms & investigative_terms and document.risk_level not in {"READ_ONLY", "LOW"}:

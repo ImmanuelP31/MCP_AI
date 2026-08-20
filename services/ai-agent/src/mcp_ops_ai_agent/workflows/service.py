@@ -29,6 +29,7 @@ from mcp_ops_ai_agent.engineering_rag.models import (
 from mcp_ops_ai_agent.gateway import GatewayClient, gateway_client_from_settings
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService
 from mcp_ops_ai_agent.tool_discovery.models import ToolDocument
+from mcp_ops_ai_agent.tool_discovery.retrieval import lexical_score as tool_lexical_score
 from mcp_ops_ai_agent.workflows.arguments import (
     ArgumentBindingError,
     normalize_tool_output,
@@ -135,6 +136,8 @@ class WorkflowPlanningService:
                     self.discovery.documents,
                     knowledge_response,
                     role=request.role,
+                    user_request=request.user_request,
+                    minimum_score=self.discovery.settings.workflow_rag_tool_augmentation_min_score,
                 )
             discovered_tools = _filter_planner_visible_tools(
                 discovered_tools,
@@ -1004,26 +1007,99 @@ def _augment_tools_from_knowledge(
     knowledge_response: EngineeringKnowledgeSearchResponse,
     *,
     role: str,
+    user_request: str,
+    minimum_score: float,
 ) -> list[ToolDocument]:
     existing = {tool.name for tool in discovered_tools}
-    evidence_text = " ".join(
-        " ".join([result.chunk.metadata.title, result.chunk.text])
+    capability_categories = {
+        category
         for result in knowledge_response.results
-    ).lower()
-    additions: list[ToolDocument] = []
+        if result.combined_score >= minimum_score
+        for category in result.chunk.metadata.capability_categories
+    }
+    if not capability_categories:
+        return discovered_tools
+    addition_candidates: list[tuple[float, ToolDocument]] = []
     for tool in all_tools:
         if tool.name in existing:
             continue
-        if tool.name.lower() not in evidence_text:
+        if not _tool_matches_capability(tool, capability_categories, user_request):
             continue
         if not tool.enabled:
             continue
         allowed_roles = {item.upper() for item in tool.required_roles}
         if tool.required_roles and role.upper() not in allowed_roles:
             continue
-        additions.append(tool)
-        existing.add(tool.name)
+        addition_candidates.append(
+            (_rag_tool_augmentation_score(tool, capability_categories, user_request), tool)
+        )
+    additions = [
+        tool
+        for _, tool in sorted(addition_candidates, key=lambda item: (-item[0], item[1].name))[:3]
+    ]
     return [*discovered_tools, *additions]
+
+
+def _tool_matches_capability(
+    tool: ToolDocument,
+    capability_categories: set[str],
+    user_request: str,
+) -> bool:
+    category_map = {
+        "approval": {"cicd", "device"},
+        "architecture": {"knowledge"},
+        "cicd": {"cicd", "repository"},
+        "deployment": {"cicd"},
+        "documentation": {"knowledge"},
+        "environment": {"cicd"},
+        "infrastructure": {"knowledge"},
+        "ownership": {"service_catalog"},
+        "policy": {"cicd", "knowledge"},
+        "repository": {"repository", "cicd"},
+        "run_instructions": {"knowledge"},
+        "testing": {"cicd", "repository"},
+        "ticket": {"ticket", "repository"},
+    }
+    allowed_categories = {
+        tool_category
+        for capability in capability_categories
+        for tool_category in category_map.get(capability, {capability})
+    }
+    if tool.category not in allowed_categories:
+        return False
+    request_relevance = tool_lexical_score(user_request, tool)
+    if request_relevance >= 0.08:
+        return True
+    tool_terms = {tool.category, *tool.tags}
+    return bool(capability_categories & tool_terms)
+
+
+def _rag_tool_augmentation_score(
+    tool: ToolDocument,
+    capability_categories: set[str],
+    user_request: str,
+) -> float:
+    score = tool_lexical_score(user_request, tool)
+    if tool.category in capability_categories:
+        score += 0.18
+    if "testing" in capability_categories and tool.name == "run_tests":
+        score += 0.55
+    if "deployment" in capability_categories and tool.name in {
+        "deploy_staging",
+        "get_deployment_status",
+    }:
+        score += 0.35
+    if "cicd" in capability_categories and tool.name in {
+        "get_build_status",
+        "get_latest_failed_build",
+        "get_pipeline_logs",
+    }:
+        score += 0.3
+    if "ticket" in capability_categories and tool.name in {"create_ticket", "create_issue"}:
+        score += 0.3
+    if tool.risk_level in {"HIGH", "CRITICAL"}:
+        score -= 0.4
+    return score
 
 
 def _filter_planner_visible_tools(
