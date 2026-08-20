@@ -30,6 +30,10 @@ class MalformedArguments(GatewayError):
     code = "malformed_arguments"
 
 
+class ServiceUnavailable(GatewayError):
+    code = "service_unavailable"
+
+
 class ApprovalRequired(GatewayError):
     code = "approval_required"
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
 from mcp_ops_common.config import get_settings
+from mcp_ops_mcp.dispatcher import McpToolDispatcher, ToolDefinition
+from mcp_ops_mcp.schemas import DeviceIdInput, StructuredOutput
 from mcp_ops_mcp_gateway.models import GatewayDecision, GatewayToolRequest, GatewayToolResponse
 from mcp_ops_mcp_gateway.service import McpGateway
 from mcp_ops_mcp_gateway.stores import ApprovalStore, IdempotencyStore
@@ -255,22 +258,42 @@ def test_requests_exceeding_rate_limits_are_rejected() -> None:
 
 
 def test_timeout_enforcement_denies_slow_tool_execution() -> None:
-    class AdvancingClock(MutableClock):
-        def now(self) -> datetime:
-            current = self.current
-            self.current += timedelta(seconds=10)
-            return current
+    def slow_handler(_model: DeviceIdInput) -> StructuredOutput:
+        time.sleep(3)
+        return StructuredOutput(ok=True, data={"should_not": "complete_before_deadline"})
 
     registry = {
         name: metadata.model_copy(update={"timeout_seconds": 1})
         for name, metadata in TOOL_REGISTRY.items()
     }
-    gateway = McpGateway(registry=registry, clock=AdvancingClock().now)
+    gateway = McpGateway(registry=registry, execution_isolation="thread")
+    gateway._dispatchers["device"] = McpToolDispatcher(  # noqa: SLF001 - verifies gateway deadline.
+        [
+            ToolDefinition(
+                registry["get_device"],
+                DeviceIdInput,
+                StructuredOutput,
+                slow_handler,
+            )
+        ]
+    )
 
+    started = time.perf_counter()
     response = gateway.call_tool(_request("viewer-token", "get_device", {"device_id": "SIM-014"}))
+    elapsed = time.perf_counter() - started
 
     assert response.error is not None
     assert response.error["code"] == "timeout"
+    assert elapsed < 2
+
+
+def test_process_isolated_gateway_execution_returns_structured_results() -> None:
+    gateway = McpGateway(execution_isolation="process")
+
+    response = gateway.call_tool(_request("viewer-token", "get_device", {"device_id": "SIM-014"}))
+
+    assert response.ok
+    assert response.data["tool_result"]["data"]["device"]["device_id"] == "SIM-014"
 
 
 def test_audit_records_are_written_for_allowed_and_denied_requests() -> None:

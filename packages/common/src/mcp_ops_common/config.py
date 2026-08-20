@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     mcp_gateway_timeout_seconds: int = 10
     mcp_gateway_transport_retries: int = 1
     mcp_gateway_client_mode: str = "auto"
+    mcp_tool_execution_isolation: str = "auto"
 
     llm_provider: str = "deterministic"
     openai_api_key: str = Field(default="", repr=False)

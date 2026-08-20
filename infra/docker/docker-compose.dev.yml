@@ -101,6 +101,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       REDIS_URL: redis://redis:6379/0
       SERVICE_AUTH_SHARED_SECRET: ${SERVICE_AUTH_SHARED_SECRET:-change-me-local-only}
+      MCP_TOOL_EXECUTION_ISOLATION: process
     ports:
       - "8002:8002"
     depends_on:

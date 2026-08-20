@@ -3,9 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import multiprocessing
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+from dataclasses import dataclass
 from datetime import datetime
+from queue import Empty
 from typing import Any
 from uuid import UUID
 
@@ -38,6 +43,7 @@ from mcp_ops_mcp_gateway.errors import (
     GatewayError,
     MalformedArguments,
     NonExecutableTool,
+    ServiceUnavailable,
     ToolTimeout,
     UnknownTool,
 )
@@ -65,6 +71,12 @@ GOVERNED_OPERATION_MARKER = "APPROVED_OPERATION_TOKEN"
 logger = logging.getLogger("mcp_ops.mcp_gateway")
 
 
+@dataclass(frozen=True)
+class DispatchResult:
+    is_error: bool
+    structured_content: dict[str, Any]
+
+
 class GatewayPolicyEvaluator:
     def evaluate_before_execution(
         self,
@@ -89,9 +101,11 @@ class McpGateway:
         audit_log: Any | None = None,
         clock: Callable[[], datetime] = utc_now,
         disabled_tools: set[str] | None = None,
+        execution_isolation: str | None = None,
     ) -> None:
+        settings = get_settings()
         self.registry = registry or TOOL_REGISTRY
-        if authenticator is None and get_settings().environment == "production":
+        if authenticator is None and settings.environment == "production":
             raise RuntimeError(
                 "McpGateway requires an explicit production authenticator when "
                 "ENVIRONMENT=production."
@@ -106,6 +120,10 @@ class McpGateway:
         self.policy = GatewayPolicyEvaluator()
         self.clock = clock
         self.disabled_tools = disabled_tools or set()
+        self.execution_isolation = _execution_isolation_mode(
+            execution_isolation or settings.mcp_tool_execution_isolation,
+            settings.environment,
+        )
         self._dispatchers = {
             "cicd": create_repository_dispatcher(),
             "device": create_device_dispatcher(),
@@ -188,8 +206,7 @@ class McpGateway:
                         principal,
                         metadata,
                     )
-                    result = self._dispatcher(metadata).call_tool(metadata.tool_name, routed_args)
-                    self._enforce_timeout(metadata, now)
+                    result = self._execute_with_deadline(metadata, routed_args)
                     if result.is_error:
                         raise MalformedArguments(str(result.structured_content["error"]))
                 except GatewayError as exc:
@@ -441,6 +458,23 @@ class McpGateway:
     def _dispatcher(self, metadata: ToolMetadata) -> McpToolDispatcher:
         return self._dispatchers[metadata.domain]
 
+    def _execute_with_deadline(
+        self,
+        metadata: ToolMetadata,
+        arguments: dict[str, Any],
+    ) -> DispatchResult:
+        if self.execution_isolation == "process":
+            return _execute_builtin_tool_in_process(metadata, arguments)
+        if self.execution_isolation == "thread":
+            return _execute_dispatcher_in_thread(
+                self._dispatcher(metadata),
+                metadata,
+                arguments,
+            )
+        return _dispatch_result_from_mcp(
+            self._dispatcher(metadata).call_tool(metadata.tool_name, arguments)
+        )
+
     def _validate_domain_arguments(
         self,
         arguments: dict[str, Any],
@@ -455,11 +489,6 @@ class McpGateway:
                 reason="schema_validation_failed",
             )
             raise MalformedArguments(str(result.structured_content["error"]))
-
-    def _enforce_timeout(self, metadata: ToolMetadata, started_at: datetime) -> None:
-        elapsed_seconds = (self.clock() - started_at).total_seconds()
-        if elapsed_seconds > metadata.timeout_seconds:
-            raise ToolTimeout(f"Tool {metadata.tool_name} exceeded timeout.")
 
     def _success(
         self,
@@ -564,6 +593,127 @@ class McpGateway:
                 "error_code": exc.code if exc else None,
             },
         )
+
+
+def _execution_isolation_mode(configured: str, environment: str) -> str:
+    mode = configured.lower()
+    if mode == "auto":
+        return "process" if environment in {"staging", "production"} else "thread"
+    if mode not in {"inline", "thread", "process"}:
+        raise ValueError(
+            "MCP_TOOL_EXECUTION_ISOLATION must be 'auto', 'inline', 'thread', or 'process'."
+        )
+    return mode
+
+
+def _execute_dispatcher_in_thread(
+    dispatcher: McpToolDispatcher,
+    metadata: ToolMetadata,
+    arguments: dict[str, Any],
+) -> DispatchResult:
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mcp-tool")
+    future = executor.submit(dispatcher.call_tool, metadata.tool_name, arguments)
+    timed_out = False
+    try:
+        return _dispatch_result_from_mcp(future.result(timeout=metadata.timeout_seconds))
+    except FutureTimeout as exc:
+        timed_out = True
+        future.cancel()
+        raise ToolTimeout(f"Tool {metadata.tool_name} exceeded timeout.") from exc
+    finally:
+        executor.shutdown(wait=not timed_out, cancel_futures=True)
+
+
+def _execute_builtin_tool_in_process(
+    metadata: ToolMetadata,
+    arguments: dict[str, Any],
+) -> DispatchResult:
+    context = multiprocessing.get_context("spawn")
+    result_queue = context.Queue(maxsize=1)
+    process = context.Process(
+        target=_run_builtin_tool_in_child,
+        args=(metadata.domain, metadata.tool_name, arguments, result_queue),
+        daemon=True,
+    )
+    process.start()
+    process.join(metadata.timeout_seconds)
+    if process.is_alive():
+        process.terminate()
+        process.join(1)
+        if process.is_alive():
+            process.kill()
+            process.join(1)
+        raise ToolTimeout(f"Tool {metadata.tool_name} exceeded timeout.")
+    try:
+        payload = result_queue.get_nowait()
+    except Empty as exc:
+        raise ServiceUnavailable(
+            f"Tool worker for {metadata.tool_name} exited without returning a result."
+        ) from exc
+    finally:
+        result_queue.close()
+    if not isinstance(payload, dict):
+        raise ServiceUnavailable(f"Tool worker for {metadata.tool_name} returned invalid output.")
+    if payload.get("kind") == "result":
+        structured_content = payload.get("structured_content")
+        if not isinstance(structured_content, dict):
+            raise ServiceUnavailable(
+                f"Tool worker for {metadata.tool_name} returned invalid structured output."
+            )
+        return DispatchResult(
+            is_error=bool(payload.get("is_error")),
+            structured_content=structured_content,
+        )
+    error_type = str(payload.get("error_type") or "unknown")
+    message = str(payload.get("message") or "Tool worker failed.")
+    raise ServiceUnavailable(f"Tool worker failed with {error_type}: {message}")
+
+
+def _run_builtin_tool_in_child(
+    domain: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    result_queue: Any,
+) -> None:
+    try:
+        dispatcher = _create_builtin_dispatcher(domain)
+        result = dispatcher.call_tool(tool_name, arguments)
+        result_queue.put(
+            {
+                "kind": "result",
+                "is_error": result.is_error,
+                "structured_content": result.structured_content,
+            }
+        )
+    except BaseException as exc:
+        result_queue.put(
+            {
+                "kind": "exception",
+                "error_type": exc.__class__.__name__,
+                "message": str(exc),
+            }
+        )
+
+
+def _create_builtin_dispatcher(domain: str) -> McpToolDispatcher:
+    if domain == "device":
+        return create_device_dispatcher()
+    if domain == "diagnostics":
+        return create_diagnostics_dispatcher()
+    if domain == "knowledge":
+        return create_knowledge_dispatcher()
+    if domain in {"cicd", "repository"}:
+        return create_repository_dispatcher()
+    if domain == "ticket":
+        return create_ticket_dispatcher()
+    raise ServiceUnavailable(f"No built-in MCP dispatcher is configured for domain {domain}.")
+
+
+def _dispatch_result_from_mcp(result: Any) -> DispatchResult:
+    structured_content = result.structured_content
+    if not isinstance(structured_content, dict):
+        raise ServiceUnavailable("MCP dispatcher returned invalid structured output.")
+    return DispatchResult(is_error=bool(result.is_error), structured_content=structured_content)
 
 
 def _mark_idempotency_running(
