@@ -193,10 +193,43 @@ def test_unknown_disabled_malformed_duplicate_and_expired_requests_are_rejected(
     assert malformed.error is not None
     assert malformed.error["code"] == "malformed_arguments"
     assert duplicate_first.ok
-    assert duplicate_second.error is not None
-    assert duplicate_second.error["code"] == "duplicate_operation"
+    assert duplicate_second.ok
+    assert duplicate_second.data == duplicate_first.data
     assert expired.error is not None
     assert expired.error["code"] == "expired_approval"
+
+
+def test_pending_approval_idempotency_key_is_not_replayed_as_execution_success() -> None:
+    gateway = McpGateway()
+
+    first = gateway.call_tool(
+        _request(
+            "operator-token",
+            "restart_service",
+            {
+                "device_id": "SIM-014",
+                "service_name": "sensor-ingestor",
+                "reason": "Hold pending approval.",
+            },
+            idempotency_key="pending-replay-1",
+        )
+    )
+    second = gateway.call_tool(
+        _request(
+            "operator-token",
+            "restart_service",
+            {
+                "device_id": "SIM-014",
+                "service_name": "sensor-ingestor",
+                "reason": "Hold pending approval.",
+            },
+            idempotency_key="pending-replay-1",
+        )
+    )
+
+    assert first.decision == GatewayDecision.PENDING_APPROVAL
+    assert second.error is not None
+    assert second.error["code"] == "duplicate_operation"
 
 
 def test_requests_exceeding_rate_limits_are_rejected() -> None:
@@ -348,8 +381,8 @@ def test_idempotency_keys_expire_after_retention_window() -> None:
     )
 
     assert first.ok
-    assert duplicate.error is not None
-    assert duplicate.error["code"] == "duplicate_operation"
+    assert duplicate.ok
+    assert duplicate.data == first.data
     assert after_expiry.ok
 
 

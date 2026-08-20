@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from mcp_ops_ai_agent.gateway import GatewayClient
 from mcp_ops_ai_agent.workflows.events import InMemoryWorkflowEventPublisher
@@ -25,18 +25,26 @@ from mcp_ops_observability.metrics import metrics_response
 def test_mcp_timeout_retries_failed_node_without_restarting_successful_nodes() -> None:
     repository = InMemoryWorkflowRepository()
     workflow = repository.save_workflow(
-        _workflow([_node("get_commit"), _node("ticket", depends_on=["get_commit"])])
+        _workflow(
+            [_node("get_commit"), _node("tests", tool_name="run_tests", depends_on=["get_commit"])]
+        )
     )
     gateway = SequencedGateway([_ok(), TimeoutError("MCP timeout"), _ok()])
     service = WorkflowPlanningService(repository=repository, gateway_client=gateway)
 
-    executed = service.execute(workflow.id, role="ENGINEER")
+    waiting = service.execute(workflow.id, role="ENGINEER")
+    nodes = {node.id: node for node in waiting.nodes}
+    assert waiting.status == WorkflowStatus.RUNNING
+    assert nodes["tests"].execution_status == WorkflowNodeStatus.RETRYING
+    assert nodes["tests"].next_retry_at is not None
+
+    executed = service.resume(_make_retry_due(repository, waiting.id, "tests"), role="ENGINEER")
 
     nodes = {node.id: node for node in executed.nodes}
     assert executed.status == WorkflowStatus.COMPLETED
     assert nodes["get_commit"].attempts == 1
-    assert nodes["ticket"].attempts == 2
-    assert nodes["ticket"].execution_status == WorkflowNodeStatus.SUCCEEDED
+    assert nodes["tests"].attempts == 2
+    assert nodes["tests"].execution_status == WorkflowNodeStatus.SUCCEEDED
 
 
 def test_network_failure_tool_500_and_server_unavailable_can_retry() -> None:
@@ -47,11 +55,13 @@ def test_network_failure_tool_500_and_server_unavailable_can_retry() -> None:
     ]
     for failure in failures:
         repository = InMemoryWorkflowRepository()
-        workflow = repository.save_workflow(_workflow([_node("ticket")]))
+        workflow = repository.save_workflow(_workflow([_node("tests", tool_name="run_tests")]))
         gateway = SequencedGateway([failure, _ok()])
         service = WorkflowPlanningService(repository=repository, gateway_client=gateway)
 
-        executed = service.execute(workflow.id, role="ENGINEER")
+        waiting = service.execute(workflow.id, role="ENGINEER")
+        assert waiting.nodes[0].execution_status == WorkflowNodeStatus.RETRYING
+        executed = service.resume(_make_retry_due(repository, waiting.id, "tests"), role="ENGINEER")
 
         node = executed.nodes[0]
         assert executed.status == WorkflowStatus.COMPLETED
@@ -170,20 +180,23 @@ def test_kafka_publish_unavailable_does_not_lose_checkpoint() -> None:
 
 def test_redis_unavailable_retry_and_backend_restart_recovery() -> None:
     repository = InMemoryWorkflowRepository()
-    workflow = repository.save_workflow(_workflow([_node("ticket", max_retries=0)]))
+    workflow = repository.save_workflow(_workflow([_node("tests", tool_name="run_tests")]))
     first_service = WorkflowPlanningService(
         repository=repository,
         gateway_client=SequencedGateway([RuntimeError("Redis unavailable")]),
     )
 
-    failed = first_service.execute(workflow.id, role="ENGINEER")
-    assert failed.nodes[0].execution_status == WorkflowNodeStatus.FAILED
+    waiting = first_service.execute(workflow.id, role="ENGINEER")
+    assert waiting.nodes[0].execution_status == WorkflowNodeStatus.RETRYING
 
     second_service = WorkflowPlanningService(
         repository=repository,
         gateway_client=SequencedGateway([_ok()]),
     )
-    recovered = second_service.retry_node(workflow.id, "ticket", role="ENGINEER")
+    recovered = second_service.resume(
+        _make_retry_due(repository, workflow.id, "tests"),
+        role="ENGINEER",
+    )
 
     assert recovered.status == WorkflowStatus.COMPLETED
     assert recovered.nodes[0].attempts == 2
@@ -250,18 +263,36 @@ def test_typed_condition_reads_dependency_output_to_execute_or_skip_branch() -> 
 
 def test_resiliency_metrics_are_emitted() -> None:
     repository = InMemoryWorkflowRepository()
-    workflow = repository.save_workflow(_workflow([_node("ticket")]))
+    workflow = repository.save_workflow(_workflow([_node("tests", tool_name="run_tests")]))
     service = WorkflowPlanningService(
         repository=repository,
         gateway_client=SequencedGateway([TimeoutError("timeout"), _ok()]),
     )
 
-    service.execute(workflow.id, role="ENGINEER")
+    waiting = service.execute(workflow.id, role="ENGINEER")
+    service.resume(_make_retry_due(repository, waiting.id, "tests"), role="ENGINEER")
 
     metrics = metrics_response().decode("utf-8")
     assert "workflow_executions_total" in metrics
     assert "workflow_retries_total" in metrics
     assert "workflow_execution_duration_seconds" in metrics
+
+
+def test_non_idempotent_tool_does_not_retry_just_because_workflow_id_exists() -> None:
+    repository = InMemoryWorkflowRepository()
+    workflow = repository.save_workflow(_workflow([_node("ticket")]))
+    service = WorkflowPlanningService(
+        repository=repository,
+        gateway_client=SequencedGateway([TimeoutError("timeout")]),
+    )
+
+    executed = service.execute(workflow.id, role="ENGINEER")
+
+    node = executed.nodes[0]
+    assert executed.status == WorkflowStatus.FAILED
+    assert node.execution_status == WorkflowNodeStatus.FAILED
+    assert node.attempts == 1
+    assert node.next_retry_at is None
 
 
 class SequencedGateway(GatewayClient):
@@ -304,6 +335,22 @@ def _workflow(nodes: list[WorkflowNode]) -> Workflow:
     return workflow.model_copy(
         update={"nodes": [node.model_copy(update={"workflow_id": workflow.id}) for node in nodes]}
     )
+
+
+def _make_retry_due(
+    repository: InMemoryWorkflowRepository,
+    workflow_id: UUID,
+    node_id: str,
+) -> UUID:
+    workflow = repository.get_workflow(workflow_id)
+    assert workflow is not None
+    nodes = [
+        node.model_copy(update={"next_retry_at": datetime.now(UTC) - timedelta(seconds=1)})
+        if node.id == node_id
+        else node
+        for node in workflow.nodes
+    ]
+    return repository.save_workflow(workflow.model_copy(update={"nodes": nodes})).id
 
 
 def _node(

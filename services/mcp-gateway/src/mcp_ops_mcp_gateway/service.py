@@ -54,6 +54,7 @@ from mcp_ops_mcp_gateway.stores import (
     AuditLog,
     FixedWindowRateLimiter,
     GatewayAuthorizer,
+    IdempotencyOperationStatus,
     IdempotencyStore,
     TokenAuthenticator,
     utc_now,
@@ -116,6 +117,7 @@ class McpGateway:
     def call_tool(self, request: GatewayToolRequest) -> GatewayToolResponse:
         principal: Principal | None = None
         metadata: ToolMetadata | None = None
+        idempotency_reserved = False
         started_perf = time.perf_counter()
         tokens = set_observability_context(
             request_id=str(request.correlation_id),
@@ -132,7 +134,11 @@ class McpGateway:
 
                 sanitized_args = _strip_untrusted_model_fields(request.arguments)
                 self._validate_domain_arguments(sanitized_args, principal, metadata)
-                self.idempotency.reserve(principal, request.idempotency_key, now)
+                replay = self.idempotency.reserve(principal, request.idempotency_key, now)
+                if replay is not None:
+                    self._record_tool_observability(replay, metadata, started_perf)
+                    return replay
+                idempotency_reserved = True
                 approval = self._approval_for_request(request, metadata, sanitized_args, now)
                 decision = self.policy.evaluate_before_execution(metadata, approval)
                 if decision == GatewayDecision.PENDING_APPROVAL:
@@ -169,6 +175,12 @@ class McpGateway:
                     return response
 
                 try:
+                    _mark_idempotency_running(
+                        self.idempotency,
+                        principal,
+                        request.idempotency_key,
+                        self.clock(),
+                    )
                     routed_args = self._trusted_domain_arguments(
                         sanitized_args,
                         principal,
@@ -209,11 +221,28 @@ class McpGateway:
                     approval_status=approval.status if approval else None,
                     execution_status="SUCCEEDED",
                 )
+                _complete_idempotency(
+                    self.idempotency,
+                    principal,
+                    request.idempotency_key,
+                    response,
+                    status=IdempotencyOperationStatus.SUCCEEDED,
+                    now=self.clock(),
+                )
                 self._record_tool_observability(response, metadata, started_perf)
                 return response
         except GatewayError as exc:
             actor = principal or Principal(principal_id="anonymous", role=Role.VIEWER)
             response = self._failure(request, actor, metadata, exc)
+            if principal is not None and idempotency_reserved:
+                _complete_idempotency(
+                    self.idempotency,
+                    principal,
+                    request.idempotency_key,
+                    response,
+                    status=IdempotencyOperationStatus.PERMANENT_FAILED,
+                    now=self.clock(),
+                )
             self._record_tool_observability(response, metadata, started_perf, exc, actor)
             return response
         finally:
@@ -534,6 +563,31 @@ class McpGateway:
                 "error_code": exc.code if exc else None,
             },
         )
+
+
+def _mark_idempotency_running(
+    store: Any,
+    principal: Principal,
+    idempotency_key: str,
+    now: datetime,
+) -> None:
+    mark_running = getattr(store, "mark_running", None)
+    if callable(mark_running):
+        mark_running(principal, idempotency_key, now)
+
+
+def _complete_idempotency(
+    store: Any,
+    principal: Principal,
+    idempotency_key: str,
+    response: GatewayToolResponse,
+    *,
+    status: IdempotencyOperationStatus,
+    now: datetime,
+) -> None:
+    complete = getattr(store, "complete", None)
+    if callable(complete):
+        complete(principal, idempotency_key, response, status=status, now=now)
 
 
 def _strip_untrusted_model_fields(arguments: dict[str, Any]) -> dict[str, Any]:

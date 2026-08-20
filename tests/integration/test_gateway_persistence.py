@@ -60,6 +60,32 @@ def test_gateway_persistent_stores_survive_gateway_instances() -> None:
     assert len(gateway_reloaded.audit_log.records) >= 3
 
 
+def test_gateway_persistent_idempotency_replays_completed_outcome() -> None:
+    session_factory = _session_factory()
+    gateway = _gateway(session_factory)
+
+    first = gateway.call_tool(
+        GatewayToolRequest(
+            auth_token="viewer-token",  # noqa: S106  # nosec B106 - deterministic test token.
+            tool_name="get_device",
+            arguments={"device_id": "SIM-014"},
+            idempotency_key="persistent-read-replay",
+        )
+    )
+    replay = _gateway(session_factory).call_tool(
+        GatewayToolRequest(
+            auth_token="viewer-token",  # noqa: S106  # nosec B106 - deterministic test token.
+            tool_name="get_device",
+            arguments={"device_id": "SIM-014"},
+            idempotency_key="persistent-read-replay",
+        )
+    )
+
+    assert first.ok
+    assert replay.ok
+    assert replay.data == first.data
+
+
 def test_gateway_persistent_rate_limit_is_shared_across_instances() -> None:
     session_factory = _session_factory()
     registry = dict(McpGateway().registry)

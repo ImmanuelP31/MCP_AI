@@ -4,6 +4,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from threading import Lock, RLock
 from uuid import UUID, uuid4
 
@@ -25,6 +26,7 @@ from mcp_ops_mcp_gateway.models import (
     ApprovalStatus,
     AuditRecord,
     GatewayDecision,
+    GatewayToolResponse,
     Principal,
     PrincipalType,
 )
@@ -92,11 +94,33 @@ class FixedWindowRateLimiter:
             calls.append(now)
 
 
+class IdempotencyOperationStatus(StrEnum):
+    RESERVED = "RESERVED"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    TRANSIENT_FAILED = "TRANSIENT_FAILED"
+    PERMANENT_FAILED = "PERMANENT_FAILED"
+
+
+_TERMINAL_IDEMPOTENCY_STATES = {
+    IdempotencyOperationStatus.SUCCEEDED,
+    IdempotencyOperationStatus.TRANSIENT_FAILED,
+    IdempotencyOperationStatus.PERMANENT_FAILED,
+}
+
+
+@dataclass
+class IdempotencyRecord:
+    created_at: datetime
+    status: IdempotencyOperationStatus = IdempotencyOperationStatus.RESERVED
+    response: GatewayToolResponse | None = None
+
+
 class IdempotencyStore:
     def __init__(self, ttl_seconds: int = 3600, max_entries: int = 10000) -> None:
         self._ttl_seconds = ttl_seconds
         self._max_entries = max_entries
-        self._keys: dict[tuple[str, str], datetime] = {}
+        self._keys: dict[tuple[str, str], IdempotencyRecord] = {}
         self._lock = Lock()
 
     def reserve(
@@ -104,25 +128,68 @@ class IdempotencyStore:
         principal: Principal,
         idempotency_key: str,
         now: datetime | None = None,
-    ) -> None:
+    ) -> GatewayToolResponse | None:
         reserved_at = now or utc_now()
         key = (principal.principal_id, idempotency_key)
         with self._lock:
             self._expire(reserved_at)
-            if key in self._keys:
+            existing = self._keys.get(key)
+            if existing is not None:
+                if existing.status in _TERMINAL_IDEMPOTENCY_STATES and existing.response:
+                    return existing.response
                 raise DuplicateOperation("Duplicate operation idempotency key.")
-            self._keys[key] = reserved_at
+            self._keys[key] = IdempotencyRecord(created_at=reserved_at)
             self._evict_oldest_if_needed()
+            return None
+
+    def mark_running(
+        self,
+        principal: Principal,
+        idempotency_key: str,
+        now: datetime | None = None,
+    ) -> None:
+        del now
+        key = (principal.principal_id, idempotency_key)
+        with self._lock:
+            record = self._keys.get(key)
+            if record is not None:
+                record.status = IdempotencyOperationStatus.RUNNING
+
+    def complete(
+        self,
+        principal: Principal,
+        idempotency_key: str,
+        response: GatewayToolResponse,
+        *,
+        status: IdempotencyOperationStatus | None = None,
+        now: datetime | None = None,
+    ) -> None:
+        completed_at = now or utc_now()
+        terminal_status = status or (
+            IdempotencyOperationStatus.SUCCEEDED
+            if response.ok
+            else IdempotencyOperationStatus.PERMANENT_FAILED
+        )
+        key = (principal.principal_id, idempotency_key)
+        with self._lock:
+            existing = self._keys.get(key)
+            self._keys[key] = IdempotencyRecord(
+                created_at=existing.created_at if existing else completed_at,
+                status=terminal_status,
+                response=response,
+            )
 
     def _expire(self, now: datetime) -> None:
         expires_before = now - timedelta(seconds=self._ttl_seconds)
-        expired = [key for key, created_at in self._keys.items() if created_at <= expires_before]
+        expired = [
+            key for key, record in self._keys.items() if record.created_at <= expires_before
+        ]
         for key in expired:
             self._keys.pop(key, None)
 
     def _evict_oldest_if_needed(self) -> None:
         while len(self._keys) > self._max_entries:
-            oldest_key = min(self._keys, key=lambda key: self._keys[key])
+            oldest_key = min(self._keys, key=lambda key: self._keys[key].created_at)
             self._keys.pop(oldest_key, None)
 
 

@@ -35,14 +35,14 @@ def test_partially_completed_workflow_recovers_after_backend_restart() -> None:
         repository=store,
         gateway_client=StaticGateway(),
     )
-    recovered = restarted_service.retry_node(workflow.id, "ticket", role="ENGINEER")
+    recovered = restarted_service.retry_node(workflow.id, "tests", role="ENGINEER")
 
     nodes = {node.id: node for node in recovered.nodes}
     assert recovered.status == WorkflowStatus.COMPLETED
     assert nodes["commit"].execution_status == WorkflowNodeStatus.SUCCEEDED
     assert nodes["commit"].attempts == 1
-    assert nodes["ticket"].execution_status == WorkflowNodeStatus.SUCCEEDED
-    assert nodes["ticket"].attempts == 2
+    assert nodes["tests"].execution_status == WorkflowNodeStatus.SUCCEEDED
+    assert nodes["tests"].attempts == 2
 
 
 class SqlAlchemyWorkflowStore:
@@ -84,7 +84,7 @@ def _workflow() -> Workflow:
                     "attempts": 1,
                 }
             ),
-            _node("ticket", depends_on=["commit"]).model_copy(
+            _node("tests", depends_on=["commit"]).model_copy(
                 update={
                     "execution_status": WorkflowNodeStatus.FAILED,
                     "attempts": 1,
@@ -106,16 +106,12 @@ def _workflow() -> Workflow:
 def _node(node_id: str, *, depends_on: list[str] | None = None) -> WorkflowNode:
     return WorkflowNode(
         id=node_id,
-        tool_name="create_ticket",
-        tool_server="ticket-mcp",
-        description="Create engineering ticket.",
+        tool_name="run_tests",
+        tool_server="cicd-mcp",
+        description="Run persistent recovery test suite.",
         arguments={
-            "device_id": "SIM-014",
-            "title": "Workflow ticket",
-            "description": "Persistent resume test",
-            "priority": "HIGH",
-            "team": "Engineering Operations",
-            "diagnostic_evidence": {"source": "test"},
+            "repository": "ImmanuelP31/MCP_AI",
+            "test_suite": "unit",
         },
         depends_on=depends_on or [],
         risk_level="MEDIUM",

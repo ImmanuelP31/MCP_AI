@@ -24,9 +24,11 @@ from mcp_ops_mcp_gateway.models import (
     ApprovalStatus,
     AuditRecord,
     GatewayDecision,
+    GatewayToolResponse,
     Principal,
     PrincipalType,
 )
+from mcp_ops_mcp_gateway.stores import IdempotencyOperationStatus
 
 
 class GatewayPersistenceBase(DeclarativeBase):
@@ -100,6 +102,12 @@ class GatewayIdempotencyRow(GatewayPersistenceBase):
     principal_id: Mapped[str] = mapped_column(String(160), primary_key=True)
     idempotency_key: Mapped[str] = mapped_column(String(160), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=IdempotencyOperationStatus.RESERVED.value,
+    )
+    response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
 class GatewayRateLimitRow(GatewayPersistenceBase):
@@ -127,7 +135,7 @@ class SqlAlchemyIdempotencyStore:
         principal: Principal,
         idempotency_key: str,
         now: datetime | None = None,
-    ) -> None:
+    ) -> GatewayToolResponse | None:
         reserved_at = now or datetime.now().astimezone()
         expires_before = reserved_at - timedelta(seconds=self.ttl_seconds)
         with self.session_factory() as session:
@@ -141,6 +149,16 @@ class SqlAlchemyIdempotencyStore:
                 (principal.principal_id, idempotency_key),
             )
             if existing is not None:
+                if (
+                    existing.status
+                    in {
+                        IdempotencyOperationStatus.SUCCEEDED.value,
+                        IdempotencyOperationStatus.TRANSIENT_FAILED.value,
+                        IdempotencyOperationStatus.PERMANENT_FAILED.value,
+                    }
+                    and existing.response_json
+                ):
+                    return _response_from_json(existing.response_json)
                 session.rollback()
                 raise DuplicateOperation("Duplicate operation idempotency key.")
             session.add(
@@ -148,6 +166,7 @@ class SqlAlchemyIdempotencyStore:
                     principal_id=principal.principal_id,
                     idempotency_key=idempotency_key,
                     created_at=reserved_at,
+                    status=IdempotencyOperationStatus.RESERVED.value,
                 )
             )
             count = session.scalar(select(func.count()).select_from(GatewayIdempotencyRow)) or 0
@@ -161,6 +180,57 @@ class SqlAlchemyIdempotencyStore:
                 for row in old_keys:
                     session.delete(row)
             session.commit()
+            return None
+
+    def mark_running(
+        self,
+        principal: Principal,
+        idempotency_key: str,
+        now: datetime | None = None,
+    ) -> None:
+        del now
+        with self.session_factory() as session:
+            row = session.get(GatewayIdempotencyRow, (principal.principal_id, idempotency_key))
+            if row is not None:
+                row.status = IdempotencyOperationStatus.RUNNING.value
+                session.commit()
+
+    def complete(
+        self,
+        principal: Principal,
+        idempotency_key: str,
+        response: GatewayToolResponse,
+        *,
+        status: IdempotencyOperationStatus | None = None,
+        now: datetime | None = None,
+    ) -> None:
+        completed_at = now or datetime.now().astimezone()
+        terminal_status = status or (
+            IdempotencyOperationStatus.SUCCEEDED
+            if response.ok
+            else IdempotencyOperationStatus.PERMANENT_FAILED
+        )
+        with self.session_factory() as session:
+            row = session.get(GatewayIdempotencyRow, (principal.principal_id, idempotency_key))
+            if row is None:
+                row = GatewayIdempotencyRow(
+                    principal_id=principal.principal_id,
+                    idempotency_key=idempotency_key,
+                    created_at=completed_at,
+                )
+                session.add(row)
+            row.status = terminal_status.value
+            row.response_json = response.model_dump(mode="json")
+            session.commit()
+
+
+def _response_from_json(payload: dict[str, Any]) -> GatewayToolResponse:
+    coerced = dict(payload)
+    if isinstance(coerced.get("decision"), str):
+        coerced["decision"] = GatewayDecision(coerced["decision"])
+    if isinstance(coerced.get("correlation_id"), str):
+        coerced["correlation_id"] = UUID(coerced["correlation_id"])
+    return GatewayToolResponse.model_validate(coerced)
 
 
 class SqlAlchemyFixedWindowRateLimiter:

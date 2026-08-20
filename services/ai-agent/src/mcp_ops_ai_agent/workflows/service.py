@@ -311,6 +311,17 @@ class WorkflowPlanningService:
                 nodes.append(node)
                 continue
             found = True
+            metadata = TOOL_REGISTRY.get(node.tool_name)
+            if not _metadata_retryable(metadata):
+                nodes.append(
+                    node.model_copy(
+                        update={
+                            "execution_status": WorkflowNodeStatus.FAILED,
+                            "last_error": "manual retry denied for non-idempotent tool",
+                        }
+                    )
+                )
+                continue
             nodes.append(
                 node.model_copy(
                     update={
@@ -384,6 +395,11 @@ class WorkflowPlanningService:
             }
         }
         for node in _topological_nodes(updated.nodes):
+            if (
+                node.execution_status == WorkflowNodeStatus.RETRYING
+                and not _retry_due(node)
+            ):
+                return updated
             if node.execution_status in {
                 WorkflowNodeStatus.SUCCEEDED,
                 WorkflowNodeStatus.COMPENSATED,
@@ -476,6 +492,8 @@ class WorkflowPlanningService:
                     outcome="waiting_approval",
                     duration_seconds=time.perf_counter() - started,
                 )
+                return updated
+            if latest.execution_status == WorkflowNodeStatus.RETRYING:
                 return updated
             if latest.execution_status in {WorkflowNodeStatus.FAILED, WorkflowNodeStatus.BLOCKED}:
                 record_workflow_execution_failure(role=role, reason=latest.last_error or "failed")
@@ -584,11 +602,12 @@ class WorkflowPlanningService:
             current = self._replace_nodes(current, nodes_by_id)
             current = self._checkpoint(current, "workflow.node.failed", node_id=node.id)
             metadata = TOOL_REGISTRY.get(failed_node.tool_name)
-            if _retry_allowed(failed_node, metadata):
+            if _transient_failure(response) and _retry_allowed(failed_node, metadata):
                 retry_node = failed_node.model_copy(
                     update={
                         "execution_status": WorkflowNodeStatus.RETRYING,
                         "next_retry_at": _next_retry_time(failed_node),
+                        "completed_at": None,
                     }
                 )
                 nodes_by_id[node.id] = retry_node
@@ -600,7 +619,7 @@ class WorkflowPlanningService:
                     strategy=retry_node.retry_strategy.value,
                 )
                 node = retry_node
-                continue
+                return current
             if failed_node.compensation_tool:
                 return self._compensate_node(failed_node, role, current, nodes_by_id)
             return current
@@ -848,7 +867,9 @@ class WorkflowPlanningService:
                 auth_token=_role_token(role),
                 tool_name=node.tool_name,
                 arguments=node.arguments,
-                idempotency_key=f"workflow-{node.workflow_id}-{node.id}",
+                idempotency_key=(
+                    f"workflow-{node.workflow_id}-{node.id}-attempt-{max(node.attempts, 1)}"
+                ),
                 workflow_id=node.workflow_id,
                 workflow_node_id=node.id,
             )
@@ -889,7 +910,13 @@ def _embedding_provider_name(discovery: object) -> str:
 
 
 def _can_be_resumed(node: WorkflowNode) -> bool:
+    if node.execution_status == WorkflowNodeStatus.RETRYING:
+        return _retry_due(node)
     return node.attempts <= node.max_retries or bool(node.compensation_tool)
+
+
+def _retry_due(node: WorkflowNode) -> bool:
+    return node.next_retry_at is None or datetime.now(UTC) >= node.next_retry_at
 
 
 def _approval_expired(node: WorkflowNode) -> bool:
@@ -916,11 +943,15 @@ def _retry_allowed(node: WorkflowNode, metadata: object | None) -> bool:
         return False
     if node.attempts > node.max_retries:
         return False
+    return _metadata_retryable(metadata)
+
+
+def _metadata_retryable(metadata: object | None) -> bool:
     if metadata is None:
-        return bool(node.workflow_id)
+        return False
     idempotent = bool(getattr(metadata, "idempotent", False))
     retry_safe = bool(getattr(metadata, "retry_safe", False))
-    return idempotent or retry_safe or bool(node.workflow_id)
+    return idempotent or retry_safe
 
 
 def _next_retry_time(node: WorkflowNode) -> datetime:
@@ -931,6 +962,19 @@ def _next_retry_time(node: WorkflowNode) -> datetime:
     else:
         delay_seconds = 0
     return datetime.now(UTC) + timedelta(seconds=delay_seconds)
+
+
+def _transient_failure(response: GatewayToolResponse) -> bool:
+    if response.ok:
+        return False
+    code = response.error.get("code") if response.error else None
+    return code in {
+        "timeout",
+        "network_failure",
+        "tool_server_unavailable",
+        "server_500",
+        "rate_limit_exceeded",
+    }
 
 
 def _response_error(response: GatewayToolResponse) -> str:
