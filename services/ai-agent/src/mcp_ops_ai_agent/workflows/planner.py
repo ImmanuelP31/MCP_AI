@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import json
+import random
 import re
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Literal, Protocol
 
 from mcp_ops_common.config import Settings, get_settings
@@ -16,6 +22,8 @@ from mcp_ops_ai_agent.workflows.models import (
     WorkflowNode,
     WorkflowPlanDraft,
 )
+
+_JITTER_RANDOM = random.SystemRandom()
 
 
 class WorkflowPlanner(Protocol):
@@ -46,6 +54,8 @@ class PlannerOutputError(ValueError):
         validation_errors: list[dict[str, Any]] | None = None,
         retry_attempted: bool = False,
         retry_failure_reason: str | None = None,
+        provider_status: int | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(message)
         self.stage = stage
@@ -55,6 +65,8 @@ class PlannerOutputError(ValueError):
         self.validation_errors = validation_errors or []
         self.retry_attempted = retry_attempted
         self.retry_failure_reason = retry_failure_reason
+        self.provider_status = provider_status
+        self.retry_after_seconds = retry_after_seconds
 
 
 class PlannerConfigurationError(RuntimeError):
@@ -64,6 +76,84 @@ class PlannerConfigurationError(RuntimeError):
 class WorkflowPlanCompletionClient(Protocol):
     def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
         """Return a JSON string containing a compact PlannerDecision payload."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRetryPolicy:
+    max_attempts: int = 3
+    backoff_base_seconds: float = 1.0
+    backoff_max_seconds: float = 20.0
+    jitter_seconds: float = 0.25
+    circuit_failure_threshold: int = 5
+    circuit_cooldown_seconds: float = 60.0
+
+
+class ProviderResilientCompletionClient:
+    """Retries transient provider failures without changing planner-output validation."""
+
+    def __init__(
+        self,
+        client: WorkflowPlanCompletionClient,
+        *,
+        policy: ProviderRetryPolicy,
+        sleep: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
+        jitter: Callable[[float], float] | None = None,
+    ) -> None:
+        self.client = client
+        self.policy = policy
+        self._sleep = sleep
+        self._monotonic = monotonic
+        self._jitter = (
+            jitter
+            or (lambda upper: _JITTER_RANDOM.uniform(0.0, upper) if upper > 0 else 0.0)
+        )
+        self._consecutive_failures = 0
+        self._circuit_open_until = 0.0
+
+    def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
+        now = self._monotonic()
+        if now < self._circuit_open_until:
+            raise PlannerOutputError(
+                "Planner provider circuit breaker is open.",
+                stage="provider_circuit_open",
+                reason="transient provider failures exceeded circuit threshold",
+            )
+        max_attempts = max(1, self.policy.max_attempts)
+        last_error: PlannerOutputError | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                content = self.client.complete_json(
+                    system_prompt=system_prompt,
+                    user_payload=user_payload,
+                )
+                self._consecutive_failures = 0
+                return content
+            except PlannerOutputError as exc:
+                if not _is_transient_provider_error(exc):
+                    raise
+                last_error = exc
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self.policy.circuit_failure_threshold:
+                    self._circuit_open_until = (
+                        self._monotonic() + self.policy.circuit_cooldown_seconds
+                    )
+                if attempt >= max_attempts:
+                    break
+                self._sleep(_provider_retry_delay(exc, attempt, self.policy, self._jitter))
+        assert last_error is not None
+        raise PlannerOutputError(
+            "Planner provider transient failure persisted after retries.",
+            stage=last_error.stage,
+            reason=last_error.reason,
+            attempt=max_attempts,
+            finish_reason=last_error.finish_reason,
+            validation_errors=last_error.validation_errors,
+            retry_attempted=max_attempts > 1,
+            retry_failure_reason=last_error.reason,
+            provider_status=last_error.provider_status,
+            retry_after_seconds=last_error.retry_after_seconds,
+        ) from last_error
 
 
 class PlannerConditionProposal(BaseModel):
@@ -146,6 +236,7 @@ class OpenAIWorkflowPlanClient:
             )
             response = connection.getresponse()
             raw = response.read(3_000_000)
+            retry_after = response.getheader("Retry-After")
         except OSError as exc:
             raise PlannerOutputError(
                 f"Planner provider request failed: {exc.__class__.__name__}.",
@@ -159,6 +250,8 @@ class OpenAIWorkflowPlanClient:
                 f"Planner provider returned HTTP {response.status}.",
                 stage="provider_http",
                 reason=f"HTTP {response.status}",
+                provider_status=response.status,
+                retry_after_seconds=_parse_retry_after_seconds(retry_after),
             )
         decoded = json.loads(raw.decode("utf-8") or "{}")
         try:
@@ -263,6 +356,7 @@ class GeminiWorkflowPlanClient:
             )
             response = connection.getresponse()
             raw = response.read(3_000_000)
+            retry_after = response.getheader("Retry-After")
         except OSError as exc:
             raise PlannerOutputError(
                 f"Planner provider request failed: {exc.__class__.__name__}.",
@@ -276,6 +370,8 @@ class GeminiWorkflowPlanClient:
                 f"Planner provider returned HTTP {response.status}.",
                 stage="provider_http",
                 reason=f"HTTP {response.status}",
+                provider_status=response.status,
+                retry_after_seconds=_parse_retry_after_seconds(retry_after),
             )
         decoded = json.loads(raw.decode("utf-8") or "{}")
         finish_reason = (
@@ -506,6 +602,23 @@ class JsonWorkflowPlanner:
             ) from exc
 
 
+def _resilient_client(
+    client: WorkflowPlanCompletionClient,
+    settings: Settings,
+) -> ProviderResilientCompletionClient:
+    return ProviderResilientCompletionClient(
+        client,
+        policy=ProviderRetryPolicy(
+            max_attempts=settings.llm_provider_max_attempts,
+            backoff_base_seconds=settings.llm_provider_backoff_base_seconds,
+            backoff_max_seconds=settings.llm_provider_backoff_max_seconds,
+            jitter_seconds=settings.llm_provider_backoff_jitter_seconds,
+            circuit_failure_threshold=settings.llm_provider_circuit_failure_threshold,
+            circuit_cooldown_seconds=settings.llm_provider_circuit_cooldown_seconds,
+        ),
+    )
+
+
 def workflow_planner_from_settings(
     settings: Settings | None = None,
     *,
@@ -519,19 +632,19 @@ def workflow_planner_from_settings(
         return DeterministicWorkflowPlanner()
     if provider == "openai" and settings.openai_api_key:
         return LLMWorkflowPlanner(
-            OpenAIWorkflowPlanClient(settings),
+            _resilient_client(OpenAIWorkflowPlanClient(settings), settings),
             model_name=settings.openai_model,
             provider_name="openai",
         )
     if provider == "openrouter" and settings.openrouter_api_key:
         return LLMWorkflowPlanner(
-            OpenRouterWorkflowPlanClient(settings),
+            _resilient_client(OpenRouterWorkflowPlanClient(settings), settings),
             model_name=settings.openrouter_model,
             provider_name="openrouter",
         )
     if provider == "gemini" and settings.gemini_api_key:
         return LLMWorkflowPlanner(
-            GeminiWorkflowPlanClient(settings),
+            _resilient_client(GeminiWorkflowPlanClient(settings), settings),
             model_name=settings.gemini_model,
             provider_name="gemini",
         )
@@ -549,6 +662,44 @@ def workflow_planner_from_settings(
     raise PlannerConfigurationError(
         f"{provider.title()} planner requested but {key_name} is not configured."
     )
+
+
+def _is_transient_provider_error(exc: PlannerOutputError) -> bool:
+    if exc.stage == "provider_request":
+        return True
+    if exc.stage != "provider_http":
+        return False
+    return exc.provider_status in {429, 502, 503}
+
+
+def _provider_retry_delay(
+    exc: PlannerOutputError,
+    attempt: int,
+    policy: ProviderRetryPolicy,
+    jitter: Callable[[float], float],
+) -> float:
+    if exc.retry_after_seconds is not None:
+        return float(min(max(0.0, exc.retry_after_seconds), policy.backoff_max_seconds))
+    exponential = policy.backoff_base_seconds * (2 ** max(0, attempt - 1))
+    delay = min(exponential, policy.backoff_max_seconds)
+    return float(max(0.0, delay + jitter(policy.jitter_seconds)))
+
+
+def _parse_retry_after_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    stripped = value.strip()
+    try:
+        return max(0.0, float(stripped))
+    except ValueError:
+        pass
+    try:
+        parsed = parsedate_to_datetime(stripped)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return max(0.0, (parsed - datetime.now(UTC)).total_seconds())
 
 
 def _build_failure_workflow(

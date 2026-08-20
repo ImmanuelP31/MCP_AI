@@ -22,6 +22,8 @@ from mcp_ops_ai_agent.workflows.planner import (
     LLMWorkflowPlanner,
     PlannerConfigurationError,
     PlannerOutputError,
+    ProviderResilientCompletionClient,
+    ProviderRetryPolicy,
     workflow_planner_from_settings,
 )
 from mcp_ops_ai_agent.workflows.policy import WorkflowPolicyEvaluator
@@ -603,6 +605,92 @@ def test_workflow_planner_from_settings_supports_gemini_provider() -> None:
     assert planner.planner_model == "llm-workflow-planner:gemini-test-model"
 
 
+def test_live_planner_factory_wraps_gemini_with_provider_resilience() -> None:
+    planner = workflow_planner_from_settings(
+        Settings(
+            llm_planner_provider="gemini",
+            gemini_api_key="gemini-test-key",
+            gemini_model="gemini-test-model",
+        )
+    )
+
+    assert isinstance(planner, LLMWorkflowPlanner)
+    assert isinstance(planner.client, ProviderResilientCompletionClient)
+
+
+def test_provider_resilience_retries_429_and_honors_retry_after() -> None:
+    client = SequencedCompletionClient(
+        [
+            PlannerOutputError(
+                "rate limited",
+                stage="provider_http",
+                reason="HTTP 429",
+                provider_status=429,
+                retry_after_seconds=2.5,
+            ),
+            '{"decision":"CLARIFY","confidence":0.5,"nodes":[]}',
+        ]
+    )
+    sleeps: list[float] = []
+    resilient = ProviderResilientCompletionClient(
+        client,
+        policy=ProviderRetryPolicy(max_attempts=3, jitter_seconds=0.0),
+        sleep=sleeps.append,
+        jitter=lambda _upper: 0.0,
+    )
+
+    result = resilient.complete_json(system_prompt="system", user_payload={"request": "x"})
+
+    assert result.startswith('{"decision"')
+    assert client.calls == 2
+    assert sleeps == [2.5]
+
+
+def test_provider_resilience_opens_circuit_after_transient_failures() -> None:
+    client = SequencedCompletionClient(
+        [
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+        ]
+    )
+    now = 10.0
+    resilient = ProviderResilientCompletionClient(
+        client,
+        policy=ProviderRetryPolicy(
+            max_attempts=1,
+            backoff_base_seconds=0.0,
+            jitter_seconds=0.0,
+            circuit_failure_threshold=2,
+            circuit_cooldown_seconds=30.0,
+        ),
+        sleep=lambda _seconds: None,
+        monotonic=lambda: now,
+        jitter=lambda _upper: 0.0,
+    )
+
+    with pytest.raises(PlannerOutputError) as first:
+        resilient.complete_json(system_prompt="system", user_payload={})
+    with pytest.raises(PlannerOutputError) as second:
+        resilient.complete_json(system_prompt="system", user_payload={})
+    with pytest.raises(PlannerOutputError) as third:
+        resilient.complete_json(system_prompt="system", user_payload={})
+
+    assert first.value.retry_attempted is False
+    assert second.value.stage == "provider_http"
+    assert third.value.stage == "provider_circuit_open"
+    assert client.calls == 2
+
+
 def test_workflow_planner_from_settings_fails_closed_for_missing_live_provider() -> None:
     with pytest.raises(PlannerConfigurationError):
         workflow_planner_from_settings(
@@ -756,3 +844,17 @@ def _node(
 
 def _codes(error: WorkflowValidationError) -> set[str]:
     return {issue.code for issue in error.issues}
+
+
+class SequencedCompletionClient:
+    def __init__(self, responses: list[str | PlannerOutputError]) -> None:
+        self.responses = responses
+        self.calls = 0
+
+    def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
+        del system_prompt, user_payload
+        response = self.responses[min(self.calls, len(self.responses) - 1)]
+        self.calls += 1
+        if isinstance(response, PlannerOutputError):
+            raise response
+        return response

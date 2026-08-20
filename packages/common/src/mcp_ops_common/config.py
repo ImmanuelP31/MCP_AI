@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.5-flash"
     llm_timeout_seconds: int = 20
     llm_planner_provider: str = "deterministic"
+    llm_provider_max_attempts: int = 3
+    llm_provider_backoff_base_seconds: float = 1.0
+    llm_provider_backoff_max_seconds: float = 20.0
+    llm_provider_backoff_jitter_seconds: float = 0.25
+    llm_provider_circuit_failure_threshold: int = 5
+    llm_provider_circuit_cooldown_seconds: float = 60.0
 
     embedding_provider: str = "hashing"
     openai_embedding_model: str = "text-embedding-3-small"
