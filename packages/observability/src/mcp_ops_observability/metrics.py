@@ -280,6 +280,72 @@ AI_WORKFLOW_EVALUATION_SCORE = Gauge(
     ["config", "mode", "metric"],
     registry=REGISTRY,
 )
+PROVIDER_REQUEST_TOTAL = Counter(
+    "provider_request_total",
+    "Total LLM provider requests.",
+    ["provider", "outcome"],
+    registry=REGISTRY,
+)
+PROVIDER_RETRY_TOTAL = Counter(
+    "provider_retry_total",
+    "Total LLM provider transport retries.",
+    ["provider", "status"],
+    registry=REGISTRY,
+)
+PROVIDER_RETRY_DELAY_SECONDS = Histogram(
+    "provider_retry_delay_seconds",
+    "LLM provider retry delay in seconds.",
+    ["provider", "status"],
+    registry=REGISTRY,
+)
+PROVIDER_429_TOTAL = Counter(
+    "provider_429_total",
+    "Total LLM provider HTTP 429 rate-limit responses.",
+    ["provider"],
+    registry=REGISTRY,
+)
+PROVIDER_TIMEOUT_TOTAL = Counter(
+    "provider_timeout_total",
+    "Total LLM provider timeout-like request failures.",
+    ["provider"],
+    registry=REGISTRY,
+)
+PROVIDER_TRUNCATION_TOTAL = Counter(
+    "provider_truncation_total",
+    "Total LLM provider responses truncated by output-token limits.",
+    ["provider"],
+    registry=REGISTRY,
+)
+CIRCUIT_STATE = Gauge(
+    "circuit_state",
+    "LLM provider circuit state: closed=0, open=1, half_open=2.",
+    ["provider", "state"],
+    registry=REGISTRY,
+)
+CIRCUIT_OPEN_TOTAL = Counter(
+    "circuit_open_total",
+    "Total LLM provider circuit-open transitions.",
+    ["provider"],
+    registry=REGISTRY,
+)
+CIRCUIT_HALF_OPEN_TOTAL = Counter(
+    "circuit_half_open_total",
+    "Total LLM provider circuit half-open probe transitions.",
+    ["provider"],
+    registry=REGISTRY,
+)
+PLANNER_CORRECTION_RETRY_TOTAL = Counter(
+    "planner_correction_retry_total",
+    "Total planner correction retries after malformed output.",
+    ["planner_model", "stage"],
+    registry=REGISTRY,
+)
+PLANNER_TRUNCATION_RETRY_TOTAL = Counter(
+    "planner_truncation_retry_total",
+    "Total planner retries after provider output truncation.",
+    ["planner_model"],
+    registry=REGISTRY,
+)
 
 
 def metrics_response() -> bytes:
@@ -519,3 +585,48 @@ def record_ai_evaluation_summary(
         if key in {"config", "mode"} or not isinstance(value, int | float):
             continue
         AI_WORKFLOW_EVALUATION_SCORE.labels(config, mode, key).set(float(value))
+
+
+def record_provider_request(*, provider: str, outcome: str) -> None:
+    PROVIDER_REQUEST_TOTAL.labels(provider, outcome).inc()
+
+
+def record_provider_retry(*, provider: str, status: str, delay_seconds: float) -> None:
+    PROVIDER_RETRY_TOTAL.labels(provider, status).inc()
+    PROVIDER_RETRY_DELAY_SECONDS.labels(provider, status).observe(delay_seconds)
+
+
+def record_provider_429(*, provider: str) -> None:
+    PROVIDER_429_TOTAL.labels(provider).inc()
+
+
+def record_provider_timeout(*, provider: str) -> None:
+    PROVIDER_TIMEOUT_TOTAL.labels(provider).inc()
+
+
+def record_provider_truncation(*, provider: str) -> None:
+    PROVIDER_TRUNCATION_TOTAL.labels(provider).inc()
+
+
+def set_circuit_state(*, provider: str, state: str) -> None:
+    values = {"closed": 0.0, "open": 1.0, "half_open": 2.0}
+    for label, value in values.items():
+        CIRCUIT_STATE.labels(provider, label).set(value if label == state else 0.0)
+
+
+def record_circuit_open(*, provider: str) -> None:
+    CIRCUIT_OPEN_TOTAL.labels(provider).inc()
+    set_circuit_state(provider=provider, state="open")
+
+
+def record_circuit_half_open(*, provider: str) -> None:
+    CIRCUIT_HALF_OPEN_TOTAL.labels(provider).inc()
+    set_circuit_state(provider=provider, state="half_open")
+
+
+def record_planner_correction_retry(*, planner_model: str, stage: str) -> None:
+    PLANNER_CORRECTION_RETRY_TOTAL.labels(planner_model, stage).inc()
+
+
+def record_planner_truncation_retry(*, planner_model: str) -> None:
+    PLANNER_TRUNCATION_RETRY_TOTAL.labels(planner_model).inc()

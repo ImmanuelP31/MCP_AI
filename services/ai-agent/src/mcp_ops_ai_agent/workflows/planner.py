@@ -11,6 +11,18 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Literal, Protocol
 
 from mcp_ops_common.config import Settings, get_settings
+from mcp_ops_observability.metrics import (
+    record_circuit_half_open,
+    record_circuit_open,
+    record_planner_correction_retry,
+    record_planner_truncation_retry,
+    record_provider_429,
+    record_provider_request,
+    record_provider_retry,
+    record_provider_timeout,
+    record_provider_truncation,
+    set_circuit_state,
+)
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mcp_ops_ai_agent.engineering_rag.models import KnowledgeSearchResult
@@ -24,6 +36,7 @@ from mcp_ops_ai_agent.workflows.models import (
 )
 
 _JITTER_RANDOM = random.SystemRandom()
+CircuitState = Literal["closed", "open", "half_open"]
 
 
 class WorkflowPlanner(Protocol):
@@ -86,6 +99,7 @@ class ProviderRetryPolicy:
     jitter_seconds: float = 0.25
     circuit_failure_threshold: int = 5
     circuit_cooldown_seconds: float = 60.0
+    half_open_probe_count: int = 1
 
 
 class ProviderResilientCompletionClient:
@@ -96,52 +110,71 @@ class ProviderResilientCompletionClient:
         client: WorkflowPlanCompletionClient,
         *,
         policy: ProviderRetryPolicy,
+        provider_name: str | None = None,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
         jitter: Callable[[float], float] | None = None,
     ) -> None:
         self.client = client
         self.policy = policy
+        self.provider_name = provider_name or _provider_name(client)
         self._sleep = sleep
         self._monotonic = monotonic
         self._jitter = (
             jitter
             or (lambda upper: _JITTER_RANDOM.uniform(0.0, upper) if upper > 0 else 0.0)
         )
-        self._consecutive_failures = 0
+        self._consecutive_request_failures = 0
         self._circuit_open_until = 0.0
+        self._circuit_state: CircuitState = "closed"
+        self._half_open_successes = 0
+        set_circuit_state(provider=self.provider_name, state="closed")
+
+    def reset_provider_state(self) -> None:
+        """Clear cross-request resilience state without changing retry behavior."""
+
+        self._consecutive_request_failures = 0
+        self._circuit_open_until = 0.0
+        self._circuit_state = "closed"
+        self._half_open_successes = 0
+        set_circuit_state(provider=self.provider_name, state="closed")
 
     def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
         now = self._monotonic()
-        if now < self._circuit_open_until:
-            raise PlannerOutputError(
-                "Planner provider circuit breaker is open.",
-                stage="provider_circuit_open",
-                reason="transient provider failures exceeded circuit threshold",
-            )
+        self._refresh_circuit(now)
+        if self._circuit_state == "open":
+            record_provider_request(provider=self.provider_name, outcome="circuit_open")
+            raise _circuit_open_error()
         max_attempts = max(1, self.policy.max_attempts)
         last_error: PlannerOutputError | None = None
         for attempt in range(1, max_attempts + 1):
             try:
+                record_provider_request(provider=self.provider_name, outcome="attempt")
                 content = self.client.complete_json(
                     system_prompt=system_prompt,
                     user_payload=user_payload,
                 )
-                self._consecutive_failures = 0
+                record_provider_request(provider=self.provider_name, outcome="success")
+                self._record_logical_success()
                 return content
             except PlannerOutputError as exc:
                 if not _is_transient_provider_error(exc):
+                    record_provider_request(provider=self.provider_name, outcome=exc.stage)
                     raise
                 last_error = exc
-                self._consecutive_failures += 1
-                if self._consecutive_failures >= self.policy.circuit_failure_threshold:
-                    self._circuit_open_until = (
-                        self._monotonic() + self.policy.circuit_cooldown_seconds
-                    )
+                _record_transient_provider_metric(self.provider_name, exc)
                 if attempt >= max_attempts:
                     break
-                self._sleep(_provider_retry_delay(exc, attempt, self.policy, self._jitter))
+                delay = _provider_retry_delay(exc, attempt, self.policy, self._jitter)
+                record_provider_retry(
+                    provider=self.provider_name,
+                    status=str(exc.provider_status or exc.stage),
+                    delay_seconds=delay,
+                )
+                self._sleep(delay)
         assert last_error is not None
+        self._record_logical_failure()
+        record_provider_request(provider=self.provider_name, outcome="transient_failed")
         raise PlannerOutputError(
             "Planner provider transient failure persisted after retries.",
             stage=last_error.stage,
@@ -154,6 +187,37 @@ class ProviderResilientCompletionClient:
             provider_status=last_error.provider_status,
             retry_after_seconds=last_error.retry_after_seconds,
         ) from last_error
+
+    def _refresh_circuit(self, now: float) -> None:
+        if self._circuit_state == "open" and now >= self._circuit_open_until:
+            self._circuit_state = "half_open"
+            self._half_open_successes = 0
+            record_circuit_half_open(provider=self.provider_name)
+
+    def _record_logical_success(self) -> None:
+        if self._circuit_state == "half_open":
+            self._half_open_successes += 1
+            if self._half_open_successes >= max(1, self.policy.half_open_probe_count):
+                self._consecutive_request_failures = 0
+                self._circuit_state = "closed"
+                self._half_open_successes = 0
+                set_circuit_state(provider=self.provider_name, state="closed")
+            return
+        self._consecutive_request_failures = 0
+
+    def _record_logical_failure(self) -> None:
+        self._half_open_successes = 0
+        if self._circuit_state == "half_open":
+            self._open_circuit()
+            return
+        self._consecutive_request_failures += 1
+        if self._consecutive_request_failures >= self.policy.circuit_failure_threshold:
+            self._open_circuit()
+
+    def _open_circuit(self) -> None:
+        self._circuit_state = "open"
+        self._circuit_open_until = self._monotonic() + self.policy.circuit_cooldown_seconds
+        record_circuit_open(provider=self.provider_name)
 
 
 class PlannerConditionProposal(BaseModel):
@@ -380,6 +444,7 @@ class GeminiWorkflowPlanClient:
             else None
         )
         if finish_reason == "MAX_TOKENS":
+            record_provider_truncation(provider="gemini")
             raise PlannerOutputError(
                 "Planner provider truncated JSON at max output tokens.",
                 stage="provider_response",
@@ -442,11 +507,24 @@ class LLMWorkflowPlanner:
                 attempt=1,
             )
         except PlannerOutputError as first_error:
-            if not self.retry_with_feedback or first_error.stage not in {
-                "json_parse",
-                "schema_validation",
-            }:
+            if not self.retry_with_feedback:
                 raise
+            if _is_truncation_error(first_error):
+                record_planner_truncation_retry(planner_model=self.planner_model)
+                return self._retry_after_truncation(
+                    first_error,
+                    payload,
+                    system_prompt,
+                    user_request,
+                    tools,
+                    target_environment,
+                )
+            if first_error.stage not in {"json_parse", "schema_validation"}:
+                raise
+            record_planner_correction_retry(
+                planner_model=self.planner_model,
+                stage=first_error.stage,
+            )
             retry_payload = {
                 **payload,
                 "correction_feedback": (
@@ -482,7 +560,48 @@ class LLMWorkflowPlanner:
                     validation_errors=second_error.validation_errors,
                     retry_attempted=True,
                     retry_failure_reason=second_error.reason,
+                    provider_status=second_error.provider_status,
+                    retry_after_seconds=second_error.retry_after_seconds,
                 ) from second_error
+
+    def _retry_after_truncation(
+        self,
+        first_error: PlannerOutputError,
+        payload: dict[str, Any],
+        system_prompt: str,
+        user_request: str,
+        tools: list[ToolDocument],
+        target_environment: str,
+    ) -> WorkflowPlanDraft:
+        retry_payload = _compact_truncation_retry_payload(payload)
+        try:
+            return self._parse(
+                self.client.complete_json(
+                    system_prompt=(
+                        f"{system_prompt}\n\n"
+                        "Truncation recovery: return compact JSON only. Use at most 4 nodes, "
+                        "no verbose reason text, and include only required fields."
+                    ),
+                    user_payload=retry_payload,
+                ),
+                user_request,
+                tools,
+                target_environment=target_environment,
+                attempt=2,
+            )
+        except PlannerOutputError as second_error:
+            raise PlannerOutputError(
+                str(second_error),
+                stage=second_error.stage,
+                reason=second_error.reason,
+                attempt=2,
+                finish_reason=second_error.finish_reason,
+                validation_errors=second_error.validation_errors,
+                retry_attempted=True,
+                retry_failure_reason=second_error.reason,
+                provider_status=second_error.provider_status,
+                retry_after_seconds=second_error.retry_after_seconds,
+            ) from first_error
 
     def _parse(
         self,
@@ -615,6 +734,7 @@ def _resilient_client(
             jitter_seconds=settings.llm_provider_backoff_jitter_seconds,
             circuit_failure_threshold=settings.llm_provider_circuit_failure_threshold,
             circuit_cooldown_seconds=settings.llm_provider_circuit_cooldown_seconds,
+            half_open_probe_count=settings.llm_provider_circuit_half_open_probe_count,
         ),
     )
 
@@ -669,7 +789,37 @@ def _is_transient_provider_error(exc: PlannerOutputError) -> bool:
         return True
     if exc.stage != "provider_http":
         return False
-    return exc.provider_status in {429, 502, 503}
+    return exc.provider_status in {429, 502, 503, 504}
+
+
+def _is_truncation_error(exc: PlannerOutputError) -> bool:
+    return exc.stage == "provider_response" and exc.finish_reason == "MAX_TOKENS"
+
+
+def _provider_name(client: WorkflowPlanCompletionClient) -> str:
+    raw = client.__class__.__name__
+    return (
+        raw.removesuffix("WorkflowPlanClient")
+        .removesuffix("CompletionClient")
+        .replace("Workflow", "")
+        .lower()
+        or "unknown"
+    )
+
+
+def _circuit_open_error() -> PlannerOutputError:
+    return PlannerOutputError(
+        "Planner provider circuit breaker is open.",
+        stage="provider_circuit_open",
+        reason="transient provider request failures exceeded circuit threshold",
+    )
+
+
+def _record_transient_provider_metric(provider: str, exc: PlannerOutputError) -> None:
+    if exc.provider_status == 429:
+        record_provider_429(provider=provider)
+    if exc.stage == "provider_request" and "timeout" in exc.reason.lower():
+        record_provider_timeout(provider=provider)
 
 
 def _provider_retry_delay(
@@ -1538,7 +1688,9 @@ def _planner_system_prompt() -> str:
         "depends_on, condition, and knowledge_references. Do not output tool_server, description, "
         "risk_level, approval_required, planner_model, workflow_id, retry settings, timeouts, or "
         "compensation tools; the trusted backend supplies those. Do not output edges; dependencies "
-        "are derived from depends_on. Arguments must be concrete JSON values matching the tool "
+        "are derived from depends_on. Keep output compact: at most 6 nodes, short snake_case ids, "
+        "reason under 80 characters, at most 2 knowledge references per node, and omit optional "
+        "fields when empty. Arguments must be concrete JSON values matching the tool "
         "input schema or dependency references using "
         "{\"$from\":\"dependency_node.output.path\"}. Example: "
         "if failed_jobs returns {\"jobs\":[{\"id\":123}]}, then get_pipeline_logs.job_id should be "
@@ -1586,10 +1738,10 @@ def _planner_payload(
         "allowed_tools": [
             {
                 "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.input_schema,
+                "description": tool.description[:180],
+                "input_schema": _compact_tool_input_schema(tool.input_schema),
                 "category": tool.category,
-                "tags": list(tool.tags),
+                "tags": list(tool.tags)[:6],
             }
             for tool in tools
         ],
@@ -1599,7 +1751,11 @@ def _planner_payload(
                 "title": result.chunk.metadata.title,
                 "document_type": result.chunk.metadata.document_type,
                 "source": result.chunk.metadata.source,
-                "excerpt": result.chunk.text[:700],
+                "service": result.chunk.metadata.service,
+                "repository": result.chunk.metadata.repository,
+                "environment": result.chunk.metadata.environment,
+                "capability_categories": list(result.chunk.metadata.capability_categories),
+                "excerpt": result.chunk.text[:260],
                 "classification": "UNTRUSTED_RETRIEVED_EVIDENCE",
             }
             for result in knowledge[:3]
@@ -1638,6 +1794,76 @@ def _planner_payload(
             "audit_records": True,
         },
     }
+
+
+def _compact_truncation_retry_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(payload)
+    trusted_task = dict(compact.get("trusted_task") or {})
+    trusted_task["compact_retry"] = True
+    trusted_task["semantic_rules"] = [
+        "Return compact JSON only.",
+        "Use at most 4 nodes.",
+        "Do not include verbose reason text.",
+        "Prefer CLARIFY when required IDs cannot be produced from upstream nodes.",
+    ]
+    compact["trusted_task"] = trusted_task
+    compact["allowed_tools"] = list(compact.get("allowed_tools") or [])[:6]
+    compact["retrieved_knowledge"] = [
+        {
+            key: value
+            for key, value in dict(item).items()
+            if key
+            in {
+                "citation_id",
+                "title",
+                "document_type",
+                "service",
+                "repository",
+                "environment",
+                "capability_categories",
+                "classification",
+            }
+        }
+        for item in list(compact.get("retrieved_knowledge") or [])[:2]
+        if isinstance(item, dict)
+    ]
+    compact["dependency_reference_examples"] = list(
+        compact.get("dependency_reference_examples") or []
+    )[:1]
+    compact["truncation_recovery"] = {
+        "previous_finish_reason": "MAX_TOKENS",
+        "output_contract": "PlannerDecision",
+        "required_response": "minimal valid JSON object",
+    }
+    return compact
+
+
+def _compact_tool_input_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    properties = schema.get("properties", {})
+    compact_properties: dict[str, Any] = {}
+    if isinstance(properties, dict):
+        for name, raw_property in properties.items():
+            if not isinstance(name, str) or not isinstance(raw_property, dict):
+                continue
+            compact_property: dict[str, Any] = {}
+            for key in ("type", "enum", "const", "default", "minimum", "maximum"):
+                if key in raw_property:
+                    compact_property[key] = raw_property[key]
+            if "items" in raw_property and isinstance(raw_property["items"], dict):
+                compact_property["items"] = {
+                    key: raw_property["items"][key]
+                    for key in ("type", "enum")
+                    if key in raw_property["items"]
+                }
+            compact_properties[name[:80]] = compact_property or {"type": "string"}
+    compact: dict[str, Any] = {
+        "type": schema.get("type", "object"),
+        "properties": compact_properties,
+    }
+    required = schema.get("required")
+    if isinstance(required, list):
+        compact["required"] = [item for item in required if isinstance(item, str)]
+    return compact
 
 
 def _is_planner_decision_payload(payload: dict[str, Any]) -> bool:

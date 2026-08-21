@@ -661,13 +661,37 @@ def test_provider_resilience_opens_circuit_after_transient_failures() -> None:
                 reason="HTTP 503",
                 provider_status=503,
             ),
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
         ]
     )
     now = 10.0
     resilient = ProviderResilientCompletionClient(
         client,
         policy=ProviderRetryPolicy(
-            max_attempts=1,
+            max_attempts=3,
             backoff_base_seconds=0.0,
             jitter_seconds=0.0,
             circuit_failure_threshold=2,
@@ -685,10 +709,146 @@ def test_provider_resilience_opens_circuit_after_transient_failures() -> None:
     with pytest.raises(PlannerOutputError) as third:
         resilient.complete_json(system_prompt="system", user_payload={})
 
-    assert first.value.retry_attempted is False
+    assert first.value.retry_attempted is True
     assert second.value.stage == "provider_http"
     assert third.value.stage == "provider_circuit_open"
+    assert client.calls == 6
+
+
+def test_provider_resilience_half_open_probe_closes_after_cooldown_success() -> None:
+    client = SequencedCompletionClient(
+        [
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+            '{"decision":"CLARIFY","confidence":0.5,"nodes":[]}',
+            '{"decision":"CLARIFY","confidence":0.5,"nodes":[]}',
+        ]
+    )
+    now = [10.0]
+    resilient = ProviderResilientCompletionClient(
+        client,
+        policy=ProviderRetryPolicy(
+            max_attempts=1,
+            backoff_base_seconds=0.0,
+            jitter_seconds=0.0,
+            circuit_failure_threshold=2,
+            circuit_cooldown_seconds=30.0,
+            half_open_probe_count=1,
+        ),
+        sleep=lambda _seconds: None,
+        monotonic=lambda: now[0],
+        jitter=lambda _upper: 0.0,
+    )
+
+    with pytest.raises(PlannerOutputError):
+        resilient.complete_json(system_prompt="system", user_payload={})
+    with pytest.raises(PlannerOutputError):
+        resilient.complete_json(system_prompt="system", user_payload={})
+    with pytest.raises(PlannerOutputError) as open_error:
+        resilient.complete_json(system_prompt="system", user_payload={})
+
+    now[0] = 41.0
+    probe = resilient.complete_json(system_prompt="system", user_payload={})
+    closed = resilient.complete_json(system_prompt="system", user_payload={})
+
+    assert open_error.value.stage == "provider_circuit_open"
+    assert probe.startswith('{"decision"')
+    assert closed.startswith('{"decision"')
+    assert client.calls == 4
+    metrics = metrics_response().decode("utf-8")
+    assert "circuit_half_open_total" in metrics
+    assert "circuit_open_total" in metrics
+
+
+def test_provider_resilience_state_can_be_reset_between_evaluation_cases() -> None:
+    client = SequencedCompletionClient(
+        [
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+            PlannerOutputError(
+                "unavailable",
+                stage="provider_http",
+                reason="HTTP 503",
+                provider_status=503,
+            ),
+            '{"decision":"CLARIFY","confidence":0.5,"nodes":[]}',
+        ]
+    )
+    resilient = ProviderResilientCompletionClient(
+        client,
+        policy=ProviderRetryPolicy(
+            max_attempts=1,
+            backoff_base_seconds=0.0,
+            jitter_seconds=0.0,
+            circuit_failure_threshold=2,
+            circuit_cooldown_seconds=30.0,
+        ),
+        sleep=lambda _seconds: None,
+        jitter=lambda _upper: 0.0,
+    )
+
+    with pytest.raises(PlannerOutputError):
+        resilient.complete_json(system_prompt="system", user_payload={})
+    with pytest.raises(PlannerOutputError):
+        resilient.complete_json(system_prompt="system", user_payload={})
+
+    resilient.reset_provider_state()
+    result = resilient.complete_json(system_prompt="system", user_payload={})
+
+    assert result.startswith('{"decision"')
+    assert client.calls == 3
+
+
+def test_llm_planner_retries_max_tokens_with_compact_payload() -> None:
+    service = WorkflowPlanningService()
+    tools = service.discovery.safe_tools_for_planner(
+        "Check why the latest build failed and inspect deployment evidence.",
+        role="ENGINEER",
+        top_k=12,
+    )
+    client = SequencedCompletionClient(
+        [
+            PlannerOutputError(
+                "truncated",
+                stage="provider_response",
+                reason="truncated JSON at max output tokens",
+                finish_reason="MAX_TOKENS",
+            ),
+            '{"decision":"CLARIFY","confidence":0.5,"nodes":[]}',
+        ]
+    )
+    planner = LLMWorkflowPlanner(
+        client,
+        model_name="gemini-test",
+        provider_name="gemini",
+    )
+
+    draft = planner.plan(
+        "Why did the latest build fail?",
+        tools,
+        role="ENGINEER",
+    )
+
+    assert draft.planner_decision == PlannerDecisionType.CLARIFY
     assert client.calls == 2
+    assert client.payloads[1]["trusted_task"]["compact_retry"] is True
+    assert len(client.payloads[1]["allowed_tools"]) <= 6
+    metrics = metrics_response().decode("utf-8")
+    assert "planner_truncation_retry_total" in metrics
 
 
 def test_workflow_planner_from_settings_fails_closed_for_missing_live_provider() -> None:
@@ -696,6 +856,9 @@ def test_workflow_planner_from_settings_fails_closed_for_missing_live_provider()
         workflow_planner_from_settings(
             Settings(
                 environment="production",
+                postgres_password=_test_secret("postgres"),
+                jwt_secret_key=_test_secret("jwt"),
+                service_auth_shared_secret=_test_secret("service"),
                 llm_planner_provider="gemini",
                 gemini_api_key="",
             ),
@@ -714,6 +877,10 @@ def test_workflow_planner_from_settings_allows_explicit_development_fallback() -
     )
 
     assert planner.planner_model == "deterministic-workflow-planner-v1"
+
+
+def _test_secret(name: str) -> str:
+    return f"test-{name}-secret"
 
 
 def test_planner_hallucinated_tool_is_rejected() -> None:
@@ -850,9 +1017,12 @@ class SequencedCompletionClient:
     def __init__(self, responses: list[str | PlannerOutputError]) -> None:
         self.responses = responses
         self.calls = 0
+        self.payloads: list[dict[str, Any]] = []
+        self.prompts: list[str] = []
 
     def complete_json(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
-        del system_prompt, user_payload
+        self.prompts.append(system_prompt)
+        self.payloads.append(user_payload)
         response = self.responses[min(self.calls, len(self.responses) - 1)]
         self.calls += 1
         if isinstance(response, PlannerOutputError):
