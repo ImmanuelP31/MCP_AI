@@ -3,6 +3,7 @@
 .pytest_cache
 .ruff_cache
 .mypy_cache
+mcp_engineering_ops.egg-info
 **/__pycache__
 **/*.pyc
 apps/frontend/node_modules

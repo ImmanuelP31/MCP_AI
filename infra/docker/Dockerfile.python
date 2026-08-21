@@ -1,17 +1,45 @@
-FROM python:3.12-slim
+ARG PYTHON_IMAGE=python:3.12.13-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2
+
+FROM ${PYTHON_IMAGE} AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-WORKDIR /app
+WORKDIR /build
 
 COPY pyproject.toml README.md ./
+COPY requirements ./requirements
 COPY apps ./apps
 COPY packages ./packages
 COPY services ./services
 
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir -e .
+RUN python -m pip install --no-cache-dir --upgrade \
+        pip==26.2.1 \
+        setuptools==83.0.0 \
+        wheel==0.47.0 \
+    && python -m pip wheel --no-cache-dir --wheel-dir /wheelhouse \
+        -r requirements/production.lock \
+    && python -m pip wheel --no-cache-dir --no-deps --no-build-isolation \
+        --wheel-dir /wheelhouse .
+
+FROM ${PYTHON_IMAGE} AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/opt/venv/bin:${PATH}"
+
+WORKDIR /app
+
+COPY --from=builder /wheelhouse /wheelhouse
+COPY apps/api/alembic.ini ./apps/api/alembic.ini
+COPY apps/api/alembic ./apps/api/alembic
+
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/python -m pip install --no-cache-dir --no-index \
+        --find-links=/wheelhouse mcp-engineering-ops \
+    && rm -rf /wheelhouse
 
 USER 65532:65532
 

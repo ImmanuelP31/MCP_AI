@@ -127,7 +127,7 @@ services:
       - "8080:80"
 
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mcp_ops}
       POSTGRES_USER: ${POSTGRES_USER:-mcp_ops}
@@ -144,7 +144,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7
+    image: redis:7@sha256:91d0f7e8c748ec7a4c2b4fb2c4f84edab794dd91d01e095e38dc906db9d684ab
     ports:
       - "16379:6379"
     healthcheck:
@@ -154,7 +154,7 @@ services:
       retries: 5
 
   kafka:
-    image: apache/kafka:3.7.0
+    image: apache/kafka:3.7.0@sha256:41c20d65b0a2180b9deca056d47540771752e69fe9225d5748dd65a25a9675d7
     ports:
       - "9092:9092"
     environment:
@@ -179,7 +179,7 @@ services:
       retries: 8
 
   opensearch:
-    image: opensearchproject/opensearch:2
+    image: opensearchproject/opensearch:2@sha256:8690b204fe914c60ca76d451ac73bc0481e034d32d3779944c8caca56a2b003f
     environment:
       discovery.type: single-node
       plugins.security.disabled: "true"
@@ -199,14 +199,14 @@ services:
       retries: 8
 
   prometheus:
-    image: prom/prometheus:v2.53.0
+    image: prom/prometheus:v2.53.0@sha256:075b1ba2c4ebb04bc3a6ab86c06ec8d8099f8fda1c96ef6d104d9bb1def1d8bc
     ports:
       - "9090:9090"
     volumes:
       - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
 
   grafana:
-    image: grafana/grafana:11.1.0
+    image: grafana/grafana:11.1.0@sha256:079600c9517b678c10cda6006b4487d3174512fd4c6cface37df7822756ed7a5
     ports:
       - "3000:3000"
     volumes:
