@@ -240,6 +240,42 @@ python -m evaluation.run --config semantic_rag_graph
 python -m evaluation.run --config semantic_rag_graph --mode real --limit 3
 ```
 
+Latest held-out live run:
+
+```powershell
+$env:EMBEDDING_PROVIDER="hashing"
+python -m evaluation.run --config semantic_rag_graph --mode real --dataset heldout_adversarial --limit 50 --provider-evaluation planner_quality --pace-seconds 8
+```
+
+The latest 50-case live Gemini planner benchmark attempted all 50 held-out adversarial cases. Gemini
+returned successful planner responses for 15 cases and HTTP `429` rate-limit/quota responses for 34
+cases; one additional provider response reached `MAX_TOKENS`. Quality metrics are therefore reported
+over the 15 provider-successful cases, while end-to-end metrics include provider availability
+failures.
+
+Measured latest run:
+
+| Metric | Value |
+| --- | ---: |
+| Provider success | 15 / 50 |
+| Provider-success workflow validity | 73.33% |
+| Provider-success plan acceptance | 66.67% |
+| Tool recall | 40.00% |
+| Tool precision | 40.00% |
+| Exact tool-set accuracy | 40.00% |
+| Approval classification accuracy | 93.33% |
+| Unknown/disallowed tool-call rate | 0.00% |
+| Policy violation attempt rate | 0.00% |
+| RAG Recall@K | 13.33% |
+| RAG MRR | 6.67% |
+| End-to-end workflow validity | 22.00% |
+
+HTTP `429` means the external Gemini provider rejected requests due to quota/rate limiting. It is
+recorded as provider availability, not as a planner-output/schema failure. This is why the benchmark
+separates provider success from planner quality. A separate attempt with live Gemini embeddings also
+failed closed with embedding HTTP `429`, so the recorded planner-quality run used the deterministic
+hashing retrieval baseline to isolate live planner behavior from embedding-provider quota.
+
 See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 
 ## Technology Stack
@@ -260,17 +296,20 @@ See [docs/ai-evaluation.md](docs/ai-evaluation.md).
 | --- | --- |
 | MCP gateway and domain servers | Implemented and covered by tests |
 | GitHub failed-build vertical slice | Live validated against `ImmanuelP31/mcp-ai-demo-target` |
-| Gemini workflow planner | Implemented with compact schema-constrained planner decisions; latest 50-case Gemini run produced 31/34 valid workflows on provider-successful cases |
+| Gemini workflow planner | Implemented with compact schema-constrained planner decisions; latest 50-case Gemini run produced 11/15 valid workflows on provider-successful cases |
 | Gemini embeddings | Implemented for live semantic retrieval; hashing remains the deterministic baseline |
 | OpenSearch RAG adapter | Live validated locally for repository-document retrieval |
 | 330-case benchmark | Deterministic/mock regression baseline |
-| 50-case held-out adversarial benchmark | Rerun after planner-compiler and evaluator fixes; latest run had 34/50 provider-successful responses, 91.18% provider-success workflow validity, 82.35% provider-success plan acceptance, 0 unknown/disallowed tool calls, and 16 Gemini HTTP 429 provider failures |
+| 50-case held-out adversarial benchmark | Latest run attempted 50 cases with Gemini planning and hashing retrieval fallback: 15/50 provider-successful responses, 73.33% provider-success workflow validity, 66.67% provider-success plan acceptance, 0 unknown/disallowed tool calls, and 34 Gemini HTTP 429 provider failures |
 | Enterprise SSO/OIDC | Not implemented; JWT boundary is present for integration |
 | Docker Compose | Local validation topology, not production deployment |
 
 ## Limitations
 
 - Mock benchmark results are deterministic; live Gemini benchmark results are labeled separately with provider/model provenance.
+- Live provider HTTP `429` results are quota/rate-limit availability failures. They should not be
+  reported as LLM reasoning failures, and they should not be hidden when presenting benchmark
+  results.
 - Benchmark plan acceptance is not execution success. Execution success is reported only when the workflow execution path actually runs MCP tools.
 - Live LLM planning and live embeddings now use Gemini for the recommended demo path. OpenAI remains a legacy-compatible provider in code, but no OpenAI key is required for the current live demo.
 - `HashingEmbeddingProvider` is a deterministic feature-hashing retrieval baseline with synonym expansion, not a learned semantic embedding model.
