@@ -22,7 +22,12 @@ from mcp_ops_ai_agent.engineering_rag.models import (
     KnowledgeSearchMode,
     KnowledgeSearchResult,
 )
+from mcp_ops_ai_agent.engineering_rag.query_analysis import (
+    RagQueryAnalysis,
+    analyze_rag_query,
+)
 from mcp_ops_ai_agent.engineering_rag.repo_docs import repository_engineering_documents
+from mcp_ops_ai_agent.engineering_rag.reranker import rerank_knowledge_results
 from mcp_ops_ai_agent.engineering_rag.retrieval import combined_score, explanation, lexical_score
 from mcp_ops_ai_agent.tool_discovery.embeddings import (
     EmbeddingProvider,
@@ -82,6 +87,7 @@ class EngineeringRagService:
         *,
         top_k: int,
     ) -> EngineeringKnowledgeSearchResponse:
+        analysis = analyze_rag_query(request.query, request.filters)
         candidate_k = max(top_k * 5, top_k + 20)
         semantic_matches = index.search(
             request.query,
@@ -98,6 +104,10 @@ class EngineeringRagService:
                 chunk.chunk_id
                 for chunk in self._filtered_chunks(request)
                 if lexical_score(request.query, chunk) > 0
+            )
+            candidate_ids.update(
+                chunk.chunk_id
+                for chunk in self._analysis_candidate_chunks(request, analysis)
             )
         for chunk_id in candidate_ids:
             chunk = chunk_by_id[chunk_id]
@@ -126,7 +136,17 @@ class EngineeringRagService:
             ranked,
             key=lambda item: (-item.combined_score, item.chunk.metadata.stale, item.citation_id),
         )
-        ranked = _dedupe_by_citation(ranked)
+        if request.mode == KnowledgeSearchMode.HYBRID:
+            rerank_pool_size = max(top_k * 4, top_k + 20)
+            ranked = rerank_knowledge_results(
+                request.query,
+                analysis,
+                ranked[:rerank_pool_size],
+                top_k=top_k,
+                max_chunks_per_document=2,
+            )
+        else:
+            ranked = _limit_by_citation(ranked, max_per_citation=2)
         return EngineeringKnowledgeSearchResponse(
             query=request.query,
             mode=request.mode.value,
@@ -154,6 +174,31 @@ class EngineeringRagService:
             and (request.filters.include_stale or not chunk.metadata.stale)
         ]
 
+    def _analysis_candidate_chunks(
+        self,
+        request: EngineeringKnowledgeSearchRequest,
+        analysis: RagQueryAnalysis,
+    ) -> list[KnowledgeChunk]:
+        candidates: list[KnowledgeChunk] = []
+        for chunk in self._filtered_chunks(request):
+            metadata = chunk.metadata
+            if metadata.document_type in analysis.likely_document_types:
+                candidates.append(chunk)
+                continue
+            if analysis.service and metadata.service == analysis.service:
+                candidates.append(chunk)
+                continue
+            if analysis.repository and metadata.repository == analysis.repository:
+                candidates.append(chunk)
+                continue
+            if analysis.environment and metadata.environment in {analysis.environment, None}:
+                if metadata.document_type in {"environment_policy", "policy", "deployment"}:
+                    candidates.append(chunk)
+                    continue
+            if set(metadata.capability_categories) & set(analysis.required_capabilities):
+                candidates.append(chunk)
+        return candidates
+
     def _default_documents(self) -> list[EngineeringDocument]:
         documents = synthetic_engineering_corpus()
         if self.settings.rag_include_repository_docs:
@@ -173,16 +218,20 @@ def _conflict_group(chunk: KnowledgeChunk) -> str | None:
     return None
 
 
-def _dedupe_by_citation(results: list[KnowledgeSearchResult]) -> list[KnowledgeSearchResult]:
-    selected: dict[str, KnowledgeSearchResult] = {}
+def _limit_by_citation(
+    results: list[KnowledgeSearchResult],
+    *,
+    max_per_citation: int,
+) -> list[KnowledgeSearchResult]:
+    counts: dict[str, int] = {}
+    selected: list[KnowledgeSearchResult] = []
     for result in results:
-        existing = selected.get(result.citation_id)
-        if existing is None or result.combined_score > existing.combined_score:
-            selected[result.citation_id] = result
-    return sorted(
-        selected.values(),
-        key=lambda item: (-item.combined_score, item.chunk.metadata.stale, item.citation_id),
-    )
+        count = counts.get(result.citation_id, 0)
+        if count >= max_per_citation:
+            continue
+        selected.append(result)
+        counts[result.citation_id] = count + 1
+    return selected
 
 
 def _index_from_settings(

@@ -33,14 +33,13 @@ def ingest_document(
         cleaned = sanitize_description(text)
         injection = detect_prompt_injection(cleaned, source="rag_document")
         chunk_id = f"{document.metadata.document_id}#chunk-{index}"
+        embedding_text = _embedding_text(document.metadata, cleaned)
         chunks.append(
             KnowledgeChunk(
                 chunk_id=chunk_id,
                 metadata=document.metadata,
                 text=cleaned,
-                embedding=embedding_provider.embed(
-                    " ".join([document.metadata.title, document.metadata.document_type, cleaned])
-                ),
+                embedding=embedding_provider.embed(embedding_text),
                 prompt_injection_detected=injection,
             )
         )
@@ -111,6 +110,33 @@ def _validate_metadata(metadata: EngineeringDocumentMetadata) -> None:
 
 
 def _chunk_text(text: str, chunk_size: int) -> list[str]:
+    sectioned = _markdown_sections(text)
+    if sectioned:
+        chunks: list[str] = []
+        for heading, body in sectioned:
+            prefix = f"Section: {heading}. "
+            for chunk in _sentence_chunks(body, max(100, chunk_size - len(prefix))):
+                chunks.append(f"{prefix}{chunk}".strip())
+        return chunks
+    return _sentence_chunks(text, chunk_size)
+
+
+def _markdown_sections(text: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"(?m)^\s*(#{1,6})\s+(.+?)\s*$", text))
+    if not matches:
+        return []
+    sections: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        heading = re.sub(r"\s+", " ", match.group(2)).strip()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        if body:
+            sections.append((heading, body))
+    return sections
+
+
+def _sentence_chunks(text: str, chunk_size: int) -> list[str]:
     normalized = re.sub(r"\s+", " ", text).strip()
     if len(normalized) <= chunk_size:
         return [normalized]
@@ -125,6 +151,22 @@ def _chunk_text(text: str, chunk_size: int) -> list[str]:
     if current:
         chunks.append(current)
     return chunks
+
+
+def _embedding_text(metadata: EngineeringDocumentMetadata, text: str) -> str:
+    return "\n".join(
+        [
+            f"Title: {metadata.title}",
+            f"Type: {metadata.document_type}",
+            f"Service: {metadata.service or ''}",
+            f"Repository: {metadata.repository or ''}",
+            f"Environment: {metadata.environment or ''}",
+            f"Owner: {metadata.owner or ''}",
+            f"Version: {metadata.version}",
+            "Capabilities: " + " ".join(metadata.capability_categories),
+            text,
+        ]
+    )
 
 
 def metadata_from_mapping(payload: dict[str, Any]) -> EngineeringDocumentMetadata:

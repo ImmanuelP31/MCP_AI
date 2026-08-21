@@ -20,6 +20,7 @@ from mcp_ops_ai_agent.engineering_rag.models import (
     KnowledgeFilters,
     KnowledgeSearchMode,
 )
+from mcp_ops_ai_agent.engineering_rag.query_analysis import analyze_rag_query
 from mcp_ops_ai_agent.engineering_rag.repo_docs import repository_engineering_documents
 from mcp_ops_ai_agent.tool_discovery.embeddings import HashingEmbeddingProvider
 from mcp_ops_observability.metrics import metrics_response
@@ -39,6 +40,34 @@ def test_hybrid_search_returns_deployment_procedure_and_citations() -> None:
     assert "ENG-POLICY-14" in citations
     assert all(result.chunk.metadata.stale is False for result in response.results)
     assert response.results[0].as_payload()["classification"] == "UNTRUSTED_RETRIEVED_EVIDENCE"
+
+
+def test_rag_query_analysis_extracts_engineering_entities_and_document_classes() -> None:
+    analysis = analyze_rag_query(
+        "Why did the payments deployment fail in prod?",
+        KnowledgeFilters(),
+    )
+
+    assert analysis.service == "payments-api"
+    assert analysis.repository == "payments-api"
+    assert analysis.environment == "production"
+    assert "deployment" in analysis.likely_document_types
+    assert "environment_policy" in analysis.likely_document_types
+    assert "cicd" in analysis.likely_document_types
+
+
+def test_entity_and_document_class_reranking_prioritizes_owner_and_api_docs() -> None:
+    service = EngineeringRagService()
+
+    owner_response = service.search(
+        EngineeringKnowledgeSearchRequest(query="Who owns payments?", top_k=3)
+    )
+    api_response = service.search(
+        EngineeringKnowledgeSearchRequest(query="What endpoint does orders-api expose?", top_k=3)
+    )
+
+    assert owner_response.results[0].citation_id == "PAYMENTS-API-OWNERSHIP-01"
+    assert api_response.results[0].citation_id == "ORDERS-API-API-01"
 
 
 def test_bm25_vector_and_hybrid_modes_are_evaluated() -> None:
@@ -192,6 +221,68 @@ def test_repository_doc_loader_is_bounded_to_allowed_documentation(tmp_path: Pat
     assert "local-repository:.github/workflows/demo.yml" in sources
     assert all("resume" not in source for source in sources)
     assert all(".env" not in source for source in sources)
+
+
+def test_markdown_ingestion_preserves_engineering_sections() -> None:
+    chunks = ingest_markdown(
+        """
+        # Payments runbook
+
+        ## Preconditions
+        Confirm build status and owner approval.
+
+        ## Rollback procedure
+        Restore the previous staging release when validation fails.
+        """,
+        EngineeringDocumentMetadata(
+            document_id="PAYMENTS-RUNBOOK-01",
+            title="Payments runbook",
+            document_type="deployment",
+            service="payments-api",
+            repository="payments-api",
+            environment="staging",
+        ),
+        embedding_provider=HashingEmbeddingProvider(),
+    )
+
+    chunk_text = "\n".join(chunk.text for chunk in chunks)
+    assert "Section: Preconditions" in chunk_text
+    assert "Section: Rollback procedure" in chunk_text
+
+
+def test_rag_result_diversity_allows_two_chunks_per_document() -> None:
+    document = EngineeringDocument(
+        metadata=EngineeringDocumentMetadata(
+            document_id="PAYMENTS-RUNBOOK-02",
+            title="payments-api deployment runbook",
+            document_type="deployment",
+            service="payments-api",
+            repository="payments-api",
+            environment="staging",
+            capability_categories=("deployment", "testing", "cicd"),
+        ),
+        content="""
+        # payments-api deployment runbook
+
+        ## Preconditions
+        Verify payments-api build status and repository tests.
+
+        ## Deployment
+        Deploy payments-api to staging after validation succeeds.
+
+        ## Rollback
+        Roll back payments-api staging if smoke tests fail.
+        """,
+    )
+    response = EngineeringRagService(documents=[document]).search(
+        EngineeringKnowledgeSearchRequest(
+            query="payments-api staging deployment rollback tests",
+            top_k=5,
+        )
+    )
+
+    assert len(response.results) == 2
+    assert all(result.citation_id == "PAYMENTS-RUNBOOK-02" for result in response.results)
 
 
 def test_empty_corpus_returns_empty_results_and_metrics() -> None:

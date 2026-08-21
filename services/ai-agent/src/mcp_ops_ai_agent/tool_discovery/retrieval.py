@@ -4,6 +4,12 @@ import math
 from collections import Counter
 
 from mcp_ops_ai_agent.tool_discovery.embeddings import expanded_tokens, tokenize
+from mcp_ops_ai_agent.tool_discovery.intent import (
+    RetrievalIntent,
+    capability_penalty,
+    capability_score,
+    document_capabilities,
+)
 from mcp_ops_ai_agent.tool_discovery.models import ToolDocument
 
 
@@ -55,39 +61,35 @@ def combined_score(
     semantic_weight: float = 0.5,
     lexical_weight: float = 0.4,
     metadata_weight: float = 1.0,
+    intent: RetrievalIntent | None = None,
 ) -> tuple[float, float]:
     lexical = lexical_score(query, document)
     metadata = metadata_score(query, document)
+    capability = capability_score(intent, document) if intent else 0.0
     combined = (
         semantic_score * semantic_weight
         + lexical * lexical_weight
         + metadata * metadata_weight
+        + capability
     )
-    query_terms = set(tokenize(query))
-    investigative_terms = {"why", "what", "show", "find", "inspect", "retrieve", "status", "failed"}
-    if query_terms & investigative_terms and document.risk_level not in {"READ_ONLY", "LOW"}:
-        combined -= 0.08
-    if "rerun" in document.name and "rerun" not in query_terms:
-        combined -= 0.12
-    if "deploy" in document.name and not ({"deploy", "deployment", "staging"} & query_terms):
-        combined -= 0.12
-    compensation_requested = {"compensate", "compensation", "rollback"} & query_terms
-    if "compensation" in document.tags and not compensation_requested:
-        combined -= 0.3
-    if document.name == "close_ticket_if_created_by_failed_workflow" and "close" not in query_terms:
-        combined -= 0.25
-    if document.name == "create_ticket" and {"create", "ticket"} <= query_terms:
-        combined += 0.12
-    if document.name == "create_issue" and {"create", "issue"} <= query_terms:
-        combined += 0.12
-    if not document.executable:
+    if intent is not None:
+        combined -= capability_penalty(intent, document)
+    elif not document.executable:
         combined -= 0.01
     return lexical, round(max(0.0, min(1.0, combined)), 4)
 
 
-def explanation(query: str, document: ToolDocument) -> str:
+def explanation(
+    query: str,
+    document: ToolDocument,
+    intent: RetrievalIntent | None = None,
+) -> str:
     query_terms = set(tokenize(query))
     matches = sorted(query_terms & set(expanded_tokens(document.discovery_text)))
+    if intent is not None:
+        overlap = sorted(intent.requested_capabilities & document_capabilities(document))
+        if overlap:
+            return "Matched requested capabilities: " + ", ".join(overlap[:5]) + "."
     if matches:
         return "Matched request terms: " + ", ".join(matches[:5]) + "."
     if document.category in query.lower():

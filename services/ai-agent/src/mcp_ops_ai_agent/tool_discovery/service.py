@@ -14,6 +14,7 @@ from mcp_ops_policy.tool_registry import TOOL_REGISTRY, ToolMetadata
 from mcp_ops_repository_mcp.server import create_dispatcher as create_repository_dispatcher
 from mcp_ops_ticket_mcp.server import create_dispatcher as create_ticket_dispatcher
 
+from mcp_ops_ai_agent.tool_discovery.coverage import complete_workflow_coverage
 from mcp_ops_ai_agent.tool_discovery.embeddings import (
     EmbeddingProvider,
     embedding_provider_from_settings,
@@ -24,6 +25,11 @@ from mcp_ops_ai_agent.tool_discovery.index import (
     ToolEmbeddingIndex,
     ToolIndexUnavailable,
 )
+from mcp_ops_ai_agent.tool_discovery.intent import (
+    RetrievalIntent,
+    capability_score,
+    extract_retrieval_intent,
+)
 from mcp_ops_ai_agent.tool_discovery.models import (
     ToolDiscoveryFilters,
     ToolDiscoveryRequest,
@@ -31,6 +37,7 @@ from mcp_ops_ai_agent.tool_discovery.models import (
     ToolDiscoveryResult,
     ToolDocument,
 )
+from mcp_ops_ai_agent.tool_discovery.reranker import rerank_results
 from mcp_ops_ai_agent.tool_discovery.retrieval import (
     combined_score,
     explanation,
@@ -124,6 +131,7 @@ class ToolDiscoveryService:
         backend: str,
     ) -> ToolDiscoveryResponse:
         candidate_k = max(request.top_k * 4, request.top_k + 12)
+        intent = extract_retrieval_intent(request.query)
         semantic_matches = index.search(
             request.query,
             self.documents,
@@ -137,7 +145,7 @@ class ToolDiscoveryService:
             document.name
             for document in self.documents
             if _matches_filters(document, request.filters)
-            and _lexical_or_metadata_candidate(request.query, document)
+            and _lexical_or_metadata_candidate(request.query, document, intent)
         )
         ranked: list[ToolDiscoveryResult] = []
         unauthorized = 0
@@ -151,6 +159,7 @@ class ToolDiscoveryService:
                 semantic_weight=self.settings.tool_discovery_semantic_weight,
                 lexical_weight=self.settings.tool_discovery_lexical_weight,
                 metadata_weight=self.settings.tool_discovery_metadata_weight,
+                intent=intent,
             )
             if score < request.minimum_score:
                 continue
@@ -164,14 +173,34 @@ class ToolDiscoveryService:
                     lexical_score=lexical,
                     combined_score=score,
                     authorization_status="authorized",
-                    explanation=explanation(request.query, document),
+                    explanation=explanation(request.query, document, intent),
                 )
             )
-        ranked = sorted(ranked, key=lambda item: (-item.combined_score, item.tool.name))
+        first_stage = sorted(
+            ranked,
+            key=lambda item: (
+                -item.combined_score,
+                -item.semantic_score,
+                -item.lexical_score,
+                item.tool.name,
+            ),
+        )
+        rerank_pool_size = min(len(first_stage), max(request.top_k * 2, 12))
+        reranked_pool = rerank_results(
+            request.query,
+            intent,
+            first_stage[:rerank_pool_size],
+            top_k=rerank_pool_size,
+        )
+        ranked = complete_workflow_coverage(
+            intent,
+            reranked_pool,
+            top_k=request.top_k,
+        )
         return ToolDiscoveryResponse(
             query=request.query,
             role=request.role,
-            ranked_tools=ranked[: request.top_k],
+            ranked_tools=ranked,
             filtered_out_unauthorized=unauthorized,
             index_backend=backend,
         )
@@ -266,8 +295,16 @@ def _minimum_score(value: float | None, settings: Settings) -> float:
     return min(max(value, 0.0), 1.0)
 
 
-def _lexical_or_metadata_candidate(query: str, document: ToolDocument) -> bool:
-    return lexical_score(query, document) > 0.0 or metadata_score(query, document) > 0.0
+def _lexical_or_metadata_candidate(
+    query: str,
+    document: ToolDocument,
+    intent: RetrievalIntent,
+) -> bool:
+    return (
+        lexical_score(query, document) > 0.0
+        or metadata_score(query, document) > 0.0
+        or capability_score(intent, document) > 0.0
+    )
 
 
 def _matches_filters(document: ToolDocument, filters: ToolDiscoveryFilters) -> bool:

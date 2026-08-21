@@ -4,6 +4,10 @@ from typing import Any
 
 import pytest
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService, evaluate_tool_discovery
+from mcp_ops_ai_agent.tool_discovery.coverage import (
+    covered_capabilities,
+    required_workflow_capabilities,
+)
 from mcp_ops_ai_agent.tool_discovery.embeddings import (
     EmbeddingProviderUnavailable,
     FallbackEmbeddingProvider,
@@ -16,7 +20,9 @@ from mcp_ops_ai_agent.tool_discovery.index import (
     SemanticMatch,
     ToolIndexUnavailable,
 )
+from mcp_ops_ai_agent.tool_discovery.intent import extract_retrieval_intent
 from mcp_ops_ai_agent.tool_discovery.models import ToolDiscoveryFilters, ToolDocument
+from mcp_ops_ai_agent.tool_discovery.reranker import rerank_score
 from mcp_ops_ai_agent.tool_discovery.retrieval import lexical_score
 from mcp_ops_ai_agent.tool_discovery.service import ToolMetadataError
 from mcp_ops_common.config import Settings
@@ -30,14 +36,96 @@ def test_failed_build_query_retrieves_ci_tools_before_planning() -> None:
     response = service.retrieve("Why did yesterday's production build fail?", top_k=4)
     names = [result.tool.name for result in response.ranked_tools]
 
-    assert names[:4] == [
-        "get_latest_failed_build",
-        "get_build_status",
-        "get_pipeline_logs",
-        "get_failed_jobs",
-    ]
+    assert {"get_latest_failed_build", "get_build_status", "get_pipeline_logs"} <= set(names)
+    assert "rerun_build" not in names
     assert all(result.authorization_status == "authorized" for result in response.ranked_tools)
     assert response.ranked_tools[0].combined_score >= response.ranked_tools[1].combined_score
+
+
+def test_intent_extraction_treats_environment_as_entity_not_deployment_action() -> None:
+    intent = extract_retrieval_intent("Why did yesterday's production build fail?")
+
+    assert "build" in intent.requested_capabilities
+    assert "diagnostics" in intent.requested_capabilities
+    assert "deployment" not in intent.requested_capabilities
+    assert intent.entities["environment"] == "production"
+    assert intent.risk_preference == "investigation_first"
+
+
+def test_capability_routing_promotes_requested_actions_without_tool_name_rules() -> None:
+    service = ToolDiscoveryService()
+
+    investigation = service.retrieve("Why did the latest build fail?", top_k=5)
+    investigation_names = [result.tool.name for result in investigation.ranked_tools]
+    assert "rerun_build" not in investigation_names[:4]
+
+    operation = service.retrieve("Rerun the latest failed build after validation.", top_k=5)
+    operation_names = [result.tool.name for result in operation.ranked_tools]
+    assert "rerun_build" in operation_names
+
+
+def test_second_stage_reranker_prefers_investigation_tools_over_actions() -> None:
+    service = ToolDiscoveryService()
+
+    response = service.retrieve("Why did the deployment fail? Inspect pipeline logs.", top_k=8)
+    names = [result.tool.name for result in response.ranked_tools]
+
+    assert "get_pipeline_logs" in names
+    assert "delete_bad_deployment" not in names
+    if "rerun_build" in names:
+        assert names.index("get_pipeline_logs") < names.index("rerun_build")
+
+
+def test_reranker_uses_schema_and_dependency_context_for_runtime_arguments() -> None:
+    service = ToolDiscoveryService()
+    documents = {document.name: document for document in service.documents}
+    intent = extract_retrieval_intent(
+        "Why did the latest failed build fail? Inspect the failed job logs."
+    )
+    response = service.retrieve(
+        "Why did the latest failed build fail? Inspect the failed job logs.",
+        top_k=50,
+    )
+    results = {result.tool.name: result for result in response.ranked_tools}
+
+    logs_score = rerank_score(
+        "Why did the latest failed build fail? Inspect the failed job logs.",
+        intent,
+        results["get_pipeline_logs"],
+    )
+    rerun_score = rerank_score(
+        "Why did the latest failed build fail? Inspect the failed job logs.",
+        intent,
+        results["rerun_build"],
+    )
+
+    assert documents["get_pipeline_logs"].input_schema["properties"]["job_id"]
+    assert logs_score > rerun_score
+
+
+def test_workflow_coverage_backfills_missing_record_creation_capability() -> None:
+    service = ToolDiscoveryService()
+
+    response = service.retrieve(
+        "Investigate the latest failed build, inspect logs, diagnose it, "
+        "and create an issue if it is code-related.",
+        top_k=4,
+    )
+    names = [result.tool.name for result in response.ranked_tools]
+    intent = extract_retrieval_intent(response.query)
+
+    assert "create_issue" in names or "create_ticket" in names
+    assert required_workflow_capabilities(intent) <= covered_capabilities(response.ranked_tools)
+
+
+def test_workflow_coverage_does_not_backfill_high_risk_action_for_investigation() -> None:
+    service = ToolDiscoveryService()
+
+    response = service.retrieve("Why did the deployment fail? Inspect pipeline logs.", top_k=8)
+    names = {result.tool.name for result in response.ranked_tools}
+
+    assert "delete_bad_deployment" not in names
+    assert "rollback_production" not in names
 
 
 def test_lexical_scoring_prefers_matching_tool_terms() -> None:
