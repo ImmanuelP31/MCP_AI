@@ -5,12 +5,17 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from mcp_ops_ai_agent.gateway import GatewayClient
-from mcp_ops_ai_agent.workflows.events import InMemoryWorkflowEventPublisher
+from mcp_ops_ai_agent.workflows.events import (
+    WORKFLOW_EVENTS_TOPIC,
+    InMemoryWorkflowEventPublisher,
+    KafkaWorkflowEventPublisher,
+)
 from mcp_ops_ai_agent.workflows.models import (
     ArgumentReference,
     ConditionOperator,
     RetryStrategy,
     Workflow,
+    WorkflowApprovalState,
     WorkflowCondition,
     WorkflowNode,
     WorkflowNodeStatus,
@@ -160,7 +165,33 @@ def test_expired_approval_fails_on_resume_without_execution() -> None:
     assert gateway.requests == []
 
 
-def test_kafka_publish_unavailable_does_not_lose_checkpoint() -> None:
+def test_waiting_approval_resume_persists_and_reuses_gateway_approval_id() -> None:
+    repository = InMemoryWorkflowRepository()
+    workflow = repository.save_workflow(
+        _workflow([_node("restart", tool_name="restart_service", max_retries=0)])
+    )
+    approval_id = uuid4()
+    gateway = SequencedGateway([_pending_approval(approval_id), _ok()])
+    service = WorkflowPlanningService(repository=repository, gateway_client=gateway)
+
+    waiting = service.execute(workflow.id, role="OPERATOR")
+    waiting_node = waiting.nodes[0]
+    assert waiting.status == WorkflowStatus.WAITING_APPROVAL
+    assert waiting_node.execution_status == WorkflowNodeStatus.WAITING_APPROVAL
+    assert waiting_node.approval_id == approval_id
+    assert waiting_node.approval_state == WorkflowApprovalState.WAITING_APPROVAL
+
+    resumed = service.resume(waiting.id, role="OPERATOR")
+    resumed_node = resumed.nodes[0]
+
+    assert resumed.status == WorkflowStatus.COMPLETED
+    assert resumed_node.execution_status == WorkflowNodeStatus.SUCCEEDED
+    assert resumed_node.approval_id == approval_id
+    assert resumed_node.approval_state == WorkflowApprovalState.SUCCEEDED
+    assert gateway.requests[1].approval_id == approval_id
+
+
+def test_outbox_publish_unavailable_does_not_lose_checkpoint() -> None:
     repository = InMemoryWorkflowRepository()
     workflow = repository.save_workflow(_workflow([_node("ticket")]))
     publisher = InMemoryWorkflowEventPublisher(fail_publish=True)
@@ -171,11 +202,54 @@ def test_kafka_publish_unavailable_does_not_lose_checkpoint() -> None:
     )
 
     executed = service.execute(workflow.id, role="ENGINEER")
+    pending = repository.pending_workflow_events(limit=20)
+    published = service.publish_pending_events(limit=20)
 
     assert executed.status == WorkflowStatus.COMPLETED
-    assert any(
-        event.event_type == "workflow.event_publish_failed" for event in executed.audit_events
+    assert pending
+    assert published == 0
+    assert repository.pending_workflow_events(limit=20)
+
+
+def test_workflow_outbox_drain_preserves_event_id_for_idempotent_consumers() -> None:
+    repository = InMemoryWorkflowRepository()
+    workflow = repository.save_workflow(_workflow([_node("ticket")]))
+    publisher = InMemoryWorkflowEventPublisher()
+    service = WorkflowPlanningService(
+        repository=repository,
+        gateway_client=SequencedGateway([_ok()]),
+        event_publisher=publisher,
     )
+
+    service.execute(workflow.id, role="ENGINEER")
+    pending = repository.pending_workflow_events(limit=20)
+    published = service.publish_pending_events(limit=20)
+
+    assert published == len(pending)
+    assert publisher.events
+    assert {event.event_id for event in publisher.events} == {event.event_id for event in pending}
+    assert repository.pending_workflow_events(limit=20) == []
+
+
+def test_workflow_outbox_can_publish_to_kafka_topic_with_stable_event_id() -> None:
+    repository = InMemoryWorkflowRepository()
+    workflow = repository.save_workflow(_workflow([_node("ticket")]))
+    producer = RecordingKafkaProducer()
+    service = WorkflowPlanningService(
+        repository=repository,
+        gateway_client=SequencedGateway([_ok()]),
+        event_publisher=KafkaWorkflowEventPublisher(producer),
+    )
+
+    service.execute(workflow.id, role="ENGINEER")
+    pending = repository.pending_workflow_events(limit=20)
+    published = service.publish_pending_events(limit=20)
+
+    assert published == len(pending)
+    assert producer.messages
+    topic, payload = producer.messages[0]
+    assert topic == WORKFLOW_EVENTS_TOPIC
+    assert payload["event_id"] in {str(event.event_id) for event in pending}
 
 
 def test_redis_unavailable_retry_and_backend_restart_recovery() -> None:
@@ -295,6 +369,23 @@ def test_non_idempotent_tool_does_not_retry_just_because_workflow_id_exists() ->
     assert node.next_retry_at is None
 
 
+def test_workflow_execution_forwards_verified_auth_token_to_gateway() -> None:
+    repository = InMemoryWorkflowRepository()
+    workflow = repository.save_workflow(_workflow([_node("tests", tool_name="run_tests")]))
+    gateway = SequencedGateway([_ok()])
+    service = WorkflowPlanningService(repository=repository, gateway_client=gateway)
+    test_token = "verified-enterprise-jwt"  # noqa: S105  # nosec B105 - deterministic test value.
+
+    executed = service.execute(
+        workflow.id,
+        role="ENGINEER",
+        auth_token=test_token,
+    )
+
+    assert executed.status == WorkflowStatus.COMPLETED
+    assert gateway.requests[0].auth_token == test_token
+
+
 class SequencedGateway(GatewayClient):
     def __init__(self, responses: list[GatewayToolResponse | BaseException]) -> None:
         self.responses = responses
@@ -321,6 +412,18 @@ class MalformedGateway(GatewayClient):
                 "error": None,
             },
         )()
+
+
+class RecordingKafkaProducer:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, dict[str, Any]]] = []
+
+    def send(self, topic: str, value: bytes) -> object:
+        import json
+
+        decoded = json.loads(value.decode("utf-8"))
+        self.messages.append((topic, decoded))
+        return None
 
 
 def _workflow(nodes: list[WorkflowNode]) -> Workflow:
@@ -388,6 +491,19 @@ def _ok(data: dict[str, Any] | None = None) -> GatewayToolResponse:
         decision=GatewayDecision.ALLOWED,
         correlation_id=uuid4(),
         data={"tool_result": {"ok": True, "data": data or {}}},
+    )
+
+
+def _pending_approval(approval_id: UUID) -> GatewayToolResponse:
+    return GatewayToolResponse(
+        ok=True,
+        decision=GatewayDecision.PENDING_APPROVAL,
+        correlation_id=uuid4(),
+        data={
+            "approval_id": str(approval_id),
+            "approval_status": "PENDING",
+            "risk_level": "HIGH",
+        },
     )
 
 

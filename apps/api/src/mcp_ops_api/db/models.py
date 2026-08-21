@@ -575,8 +575,15 @@ class WorkflowNodeModel(UuidPkMixin, TimestampMixin, VersionedMixin, Base):
             "'COMPENSATING', 'COMPENSATED', 'SKIPPED', 'CANCELLED')",
             name="workflow_node_execution_status",
         ),
+        CheckConstraint(
+            "approval_state IN ('NOT_REQUIRED', 'WAITING_APPROVAL', 'APPROVED', "
+            "'EXECUTION_QUEUED', 'EXECUTING', 'SUCCEEDED', 'REJECTED', 'EXPIRED', "
+            "'FAILED')",
+            name="workflow_node_approval_state",
+        ),
         Index("idx_workflow_nodes_workflow_status", "workflow_id", "execution_status"),
         Index("idx_workflow_nodes_tool_name", "tool_name"),
+        Index("idx_workflow_nodes_approval_id", "approval_id"),
     )
 
     workflow_id: Mapped[uuid.UUID] = mapped_column(
@@ -608,6 +615,10 @@ class WorkflowNodeModel(UuidPkMixin, TimestampMixin, VersionedMixin, Base):
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result_reference: Mapped[str | None] = mapped_column(String(240))
+    approval_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True))
+    approval_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="NOT_REQUIRED", server_default="NOT_REQUIRED"
+    )
     compensation_tool: Mapped[str | None] = mapped_column(String(128))
     policy_evaluation: Mapped[JsonDict | None] = mapped_column(JSON)
     knowledge_references: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
@@ -630,3 +641,31 @@ class WorkflowEdgeModel(UuidPkMixin, TimestampMixin, Base):
     condition: Mapped[str | None] = mapped_column(Text)
 
     workflow: Mapped[WorkflowModel] = relationship(back_populates="edges")
+
+
+class WorkflowEventOutboxModel(UuidPkMixin, TimestampMixin, Base):
+    __tablename__ = "workflow_event_outbox"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_workflow_event_outbox_event_id"),
+        CheckConstraint(
+            "status IN ('PENDING', 'PUBLISHED', 'FAILED')",
+            name="workflow_event_outbox_status",
+        ),
+        Index("idx_workflow_event_outbox_status_created_at", "status", "created_at"),
+        Index("idx_workflow_event_outbox_aggregate_created_at", "aggregate_id", "created_at"),
+        Index("idx_workflow_event_outbox_event_type", "event_type"),
+    )
+
+    event_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    aggregate_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    source: Mapped[str] = mapped_column(String(120), nullable=False)
+    correlation_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[JsonDict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="PENDING", server_default="PENDING"
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)

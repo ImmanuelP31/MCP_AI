@@ -29,6 +29,9 @@ def test_production_gateway_rejects_default_demo_auth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "enterprise-postgres-secret")
+    monkeypatch.setenv("JWT_SECRET_KEY", "enterprise-jwt-secret")
+    monkeypatch.setenv("SERVICE_AUTH_SHARED_SECRET", "enterprise-service-secret")
     get_settings.cache_clear()
 
     try:
@@ -36,6 +39,9 @@ def test_production_gateway_rejects_default_demo_auth(
             McpGateway()
     finally:
         monkeypatch.delenv("ENVIRONMENT", raising=False)
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SERVICE_AUTH_SHARED_SECRET", raising=False)
         get_settings.cache_clear()
 
 

@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 from alembic import command
 from alembic.config import Config
 from mcp_ops_ai_agent.gateway import GatewayClient
+from mcp_ops_ai_agent.workflows.events import WorkflowOutboxEvent
 from mcp_ops_ai_agent.workflows.models import (
     RetryStrategy,
     Workflow,
@@ -55,9 +56,33 @@ class SqlAlchemyWorkflowStore:
             session.commit()
             return saved
 
+    def save_workflow_with_event(
+        self,
+        workflow: Workflow,
+        event: WorkflowOutboxEvent,
+    ) -> Workflow:
+        with self.session_factory() as session:
+            saved = WorkflowRepository(session).save_workflow_with_event(workflow, event)
+            session.commit()
+            return saved
+
     def get_workflow(self, workflow_id: UUID) -> Workflow | None:
         with self.session_factory() as session:
             return WorkflowRepository(session).get_workflow(workflow_id)
+
+    def pending_workflow_events(self, *, limit: int = 100) -> list[WorkflowOutboxEvent]:
+        with self.session_factory() as session:
+            return WorkflowRepository(session).pending_workflow_events(limit=limit)
+
+    def mark_workflow_event_published(self, event_id: UUID) -> None:
+        with self.session_factory() as session:
+            WorkflowRepository(session).mark_workflow_event_published(event_id)
+            session.commit()
+
+    def mark_workflow_event_failed(self, event_id: UUID, error: str) -> None:
+        with self.session_factory() as session:
+            WorkflowRepository(session).mark_workflow_event_failed(event_id, error)
+            session.commit()
 
 
 class StaticGateway(GatewayClient):

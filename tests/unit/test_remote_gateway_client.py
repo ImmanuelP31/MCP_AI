@@ -91,15 +91,14 @@ def test_remote_gateway_client_returns_structured_unavailable_error() -> None:
 
 
 def test_gateway_client_factory_forbids_in_process_mode_in_production() -> None:
-    settings = Settings(environment="production", mcp_gateway_client_mode="in_process")
+    settings = _production_settings(mcp_gateway_client_mode="in_process")
 
     with pytest.raises(RuntimeError, match="In-process MCP gateway client"):
         gateway_client_from_settings(settings)
 
 
 def test_gateway_client_factory_auto_uses_remote_for_production() -> None:
-    settings = Settings(
-        environment="production",
+    settings = _production_settings(
         mcp_gateway_client_mode="auto",
         mcp_gateway_url="http://gateway.internal:8002",
     )
@@ -107,3 +106,18 @@ def test_gateway_client_factory_auto_uses_remote_for_production() -> None:
     client = gateway_client_from_settings(settings)
 
     assert isinstance(client, RemoteMcpGatewayClient)
+
+
+def _production_settings(**overrides: Any) -> Settings:
+    defaults: dict[str, Any] = {
+        "environment": "production",
+        "postgres_password": _test_secret("postgres"),
+        "jwt_secret_key": _test_secret("jwt"),
+        "service_auth_shared_secret": _test_secret("service"),
+    }
+    defaults.update(overrides)
+    return Settings(**defaults)
+
+
+def _test_secret(name: str) -> str:
+    return f"test-{name}-secret"

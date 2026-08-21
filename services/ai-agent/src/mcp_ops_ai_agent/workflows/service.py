@@ -42,11 +42,14 @@ from mcp_ops_ai_agent.workflows.conditions import (
 from mcp_ops_ai_agent.workflows.events import (
     InMemoryWorkflowEventPublisher,
     WorkflowEventPublisher,
+    WorkflowOutboxEvent,
+    WorkflowOutboxPublisher,
 )
 from mcp_ops_ai_agent.workflows.models import (
     PolicyDecision,
     RetryStrategy,
     Workflow,
+    WorkflowApprovalState,
     WorkflowAuditEvent,
     WorkflowNode,
     WorkflowNodeStatus,
@@ -103,6 +106,14 @@ class WorkflowPlanningService:
         self.repository = repository or InMemoryWorkflowRepository()
         self.gateway_client = gateway_client or gateway_client_from_settings()
         self.event_publisher = event_publisher or InMemoryWorkflowEventPublisher()
+
+    def publish_pending_events(self, *, limit: int = 100) -> int:
+        """Publish persisted workflow outbox events through the configured event publisher."""
+
+        return WorkflowOutboxPublisher(
+            repository=self.repository,
+            publisher=self.event_publisher,
+        ).drain(limit=limit)
 
     def plan(self, request: WorkflowPlanRequest) -> WorkflowPlanResult:
         started = time.perf_counter()
@@ -256,15 +267,20 @@ class WorkflowPlanningService:
             raise WorkflowNotFoundError(str(workflow_id))
         return workflow
 
-    def execute(self, workflow_id: UUID, *, role: str) -> Workflow:
+    def execute(self, workflow_id: UUID, *, role: str, auth_token: str | None = None) -> Workflow:
         workflow = self.get_workflow(workflow_id)
         if workflow.status == WorkflowStatus.CANCELLED:
             return workflow
         if workflow.status == WorkflowStatus.WAITING_APPROVAL:
             return workflow
-        return self._run_workflow(workflow, role=role, resumed=False)
+        return self._run_workflow(
+            workflow,
+            role=role,
+            resumed=False,
+            auth_token=auth_token,
+        )
 
-    def resume(self, workflow_id: UUID, *, role: str) -> Workflow:
+    def resume(self, workflow_id: UUID, *, role: str, auth_token: str | None = None) -> Workflow:
         workflow = self.get_workflow(workflow_id)
         if workflow.status == WorkflowStatus.CANCELLED:
             return workflow
@@ -300,12 +316,19 @@ class WorkflowPlanningService:
             deep=True,
         )
         saved = self.repository.save_workflow(resumed_workflow)
-        result = self._run_workflow(saved, role=role, resumed=True)
+        result = self._run_workflow(saved, role=role, resumed=True, auth_token=auth_token)
         if result.status in {WorkflowStatus.COMPLETED, WorkflowStatus.WAITING_APPROVAL}:
             record_workflow_recovery_success(role=role)
         return result
 
-    def retry_node(self, workflow_id: UUID, node_id: str, *, role: str) -> Workflow:
+    def retry_node(
+        self,
+        workflow_id: UUID,
+        node_id: str,
+        *,
+        role: str,
+        auth_token: str | None = None,
+    ) -> Workflow:
         workflow = self.get_workflow(workflow_id)
         nodes = []
         found = False
@@ -354,9 +377,21 @@ class WorkflowPlanningService:
             },
             deep=True,
         )
-        return self._run_workflow(self.repository.save_workflow(updated), role=role, resumed=True)
+        return self._run_workflow(
+            self.repository.save_workflow(updated),
+            role=role,
+            resumed=True,
+            auth_token=auth_token,
+        )
 
-    def _run_workflow(self, workflow: Workflow, *, role: str, resumed: bool) -> Workflow:
+    def _run_workflow(
+        self,
+        workflow: Workflow,
+        *,
+        role: str,
+        resumed: bool,
+        auth_token: str | None = None,
+    ) -> Workflow:
         started = time.perf_counter()
         updated = workflow.model_copy(
             update={
@@ -441,10 +476,19 @@ class WorkflowPlanningService:
                 updated = self._checkpoint(updated, "workflow.node.skipped", node_id=node.id)
                 continue
             metadata = TOOL_REGISTRY.get(node.tool_name)
-            ready_node = node.model_copy(update={"execution_status": WorkflowNodeStatus.READY})
+            ready_update: dict[str, object] = {"execution_status": WorkflowNodeStatus.READY}
+            if node.execution_status == WorkflowNodeStatus.WAITING_APPROVAL and node.approval_id:
+                ready_update["approval_state"] = WorkflowApprovalState.EXECUTION_QUEUED
+            ready_node = node.model_copy(update=ready_update)
             nodes_by_id[node.id] = ready_node
             updated = self._replace_nodes(updated, nodes_by_id)
             updated = self._checkpoint(updated, "workflow.node.ready", node_id=node.id)
+            if ready_node.approval_state == WorkflowApprovalState.EXECUTION_QUEUED:
+                updated = self._checkpoint(
+                    updated,
+                    "workflow.approval.execution_queued",
+                    node_id=node.id,
+                )
             evaluation = self.policy_evaluator.evaluate(
                 ready_node,
                 actor=workflow.created_by,
@@ -485,6 +529,7 @@ class WorkflowPlanningService:
                 updated,
                 nodes_by_id,
                 node_outputs,
+                auth_token=auth_token,
             )
             updated = outcome
             nodes_by_id = {item.id: item for item in updated.nodes}
@@ -511,6 +556,8 @@ class WorkflowPlanningService:
         workflow: Workflow,
         nodes_by_id: dict[str, WorkflowNode],
         node_outputs: dict[str, dict[str, Any]],
+        *,
+        auth_token: str | None = None,
     ) -> Workflow:
         current = workflow
         while True:
@@ -518,6 +565,9 @@ class WorkflowPlanningService:
             running_node = node.model_copy(
                 update={
                     "execution_status": WorkflowNodeStatus.RUNNING,
+                    "approval_state": WorkflowApprovalState.EXECUTING
+                    if node.approval_id
+                    else node.approval_state,
                     "attempts": node.attempts + 1,
                     "started_at": node.started_at or attempt_started,
                     "last_attempt_at": attempt_started,
@@ -530,6 +580,10 @@ class WorkflowPlanningService:
             try:
                 bound_node = resolve_node_arguments(running_node, node_outputs)
                 if bound_node.arguments != running_node.arguments:
+                    bound_node = bound_node.model_copy(
+                        update={"argument_references": []},
+                        deep=True,
+                    )
                     nodes_by_id[node.id] = bound_node
                     current = self._replace_nodes(current, nodes_by_id)
                     current = self._checkpoint(
@@ -538,7 +592,7 @@ class WorkflowPlanningService:
                         node_id=node.id,
                     )
                     running_node = bound_node
-                response = self._execute_node(running_node, role)
+                response = self._execute_node(running_node, role, auth_token=auth_token)
             except ArgumentBindingError as exc:
                 response = _failure_response(running_node, "argument_binding_failed", str(exc))
             except TimeoutError as exc:
@@ -549,10 +603,12 @@ class WorkflowPlanningService:
                 response = _failure_response(running_node, "tool_server_unavailable", str(exc))
             result_ref = str(response.correlation_id)
             if response.decision == GatewayDecision.PENDING_APPROVAL:
-                approval_id = response.data.get("approval_id")
+                approval_id = _approval_id_from_response(response)
                 waiting_node = running_node.model_copy(
                     update={
                         "execution_status": WorkflowNodeStatus.WAITING_APPROVAL,
+                        "approval_id": approval_id,
+                        "approval_state": WorkflowApprovalState.WAITING_APPROVAL,
                         "result_reference": str(approval_id or result_ref),
                     }
                 )
@@ -586,6 +642,9 @@ class WorkflowPlanningService:
                 succeeded_node = running_node.model_copy(
                     update={
                         "execution_status": WorkflowNodeStatus.SUCCEEDED,
+                        "approval_state": WorkflowApprovalState.SUCCEEDED
+                        if running_node.approval_id
+                        else running_node.approval_state,
                         "result_reference": result_ref,
                         "completed_at": datetime.now(UTC),
                     }
@@ -596,6 +655,7 @@ class WorkflowPlanningService:
             failed_node = running_node.model_copy(
                 update={
                     "execution_status": WorkflowNodeStatus.FAILED,
+                    "approval_state": _failed_approval_state(running_node, response),
                     "result_reference": result_ref,
                     "last_error": _response_error(response),
                     "completed_at": datetime.now(UTC),
@@ -624,7 +684,13 @@ class WorkflowPlanningService:
                 node = retry_node
                 return current
             if failed_node.compensation_tool:
-                return self._compensate_node(failed_node, role, current, nodes_by_id)
+                return self._compensate_node(
+                    failed_node,
+                    role,
+                    current,
+                    nodes_by_id,
+                    auth_token=auth_token,
+                )
             return current
 
     def _compensate_node(
@@ -633,6 +699,8 @@ class WorkflowPlanningService:
         role: str,
         workflow: Workflow,
         nodes_by_id: dict[str, WorkflowNode],
+        *,
+        auth_token: str | None = None,
     ) -> Workflow:
         compensating = node.model_copy(update={"execution_status": WorkflowNodeStatus.COMPENSATING})
         nodes_by_id[node.id] = compensating
@@ -648,7 +716,7 @@ class WorkflowPlanningService:
                 },
             }
         )
-        response = self._execute_node(compensation_request, role)
+        response = self._execute_node(compensation_request, role, auth_token=auth_token)
         if response.ok:
             compensated = compensating.model_copy(
                 update={
@@ -738,25 +806,12 @@ class WorkflowPlanningService:
             update={"version": workflow.version + 1},
             deep=True,
         )
-        try:
-            self.event_publisher.publish(event_type, event_payload)
-        except Exception as exc:  # noqa: BLE001 - event publishing must not strand execution.
-            with_event = with_event.model_copy(
-                update={
-                    "audit_events": [
-                        *with_event.audit_events,
-                        _audit_event(
-                            "workflow.event_publish_failed",
-                            workflow.created_by,
-                            "SYSTEM",
-                            f"{event_type} publish failed: {exc}",
-                            node_id,
-                        ),
-                    ]
-                },
-                deep=True,
-            )
-        return self.repository.save_workflow(with_event)
+        event = WorkflowOutboxEvent.create(
+            event_type=event_type,
+            aggregate_id=workflow.id,
+            payload=event_payload,
+        )
+        return self.repository.save_workflow_with_event(with_event, event)
 
     def _apply_planning_policy(
         self,
@@ -857,10 +912,16 @@ class WorkflowPlanningService:
         )
         return self.repository.save_workflow(cancelled)
 
-    def _execute_node(self, node: WorkflowNode, role: str) -> GatewayToolResponse:
+    def _execute_node(
+        self,
+        node: WorkflowNode,
+        role: str,
+        *,
+        auth_token: str | None = None,
+    ) -> GatewayToolResponse:
         return self.gateway_client.call_tool(
             GatewayToolRequest(
-                auth_token=_role_token(role),
+                auth_token=auth_token or _role_token(role),
                 tool_name=node.tool_name,
                 arguments=node.arguments,
                 idempotency_key=(
@@ -868,6 +929,7 @@ class WorkflowPlanningService:
                 ),
                 workflow_id=node.workflow_id,
                 workflow_node_id=node.id,
+                approval_id=node.approval_id,
             )
         )
 
@@ -928,10 +990,39 @@ def _expire_waiting_approval(node: WorkflowNode) -> WorkflowNode:
     return node.model_copy(
         update={
             "execution_status": WorkflowNodeStatus.FAILED,
+            "approval_state": WorkflowApprovalState.EXPIRED,
             "last_error": "approval expired before workflow resume",
             "completed_at": datetime.now(UTC),
         }
     )
+
+
+def _approval_id_from_response(response: GatewayToolResponse) -> UUID | None:
+    if not isinstance(response.data, dict):
+        return None
+    value = response.data.get("approval_id")
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str):
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _failed_approval_state(
+    node: WorkflowNode,
+    response: GatewayToolResponse,
+) -> WorkflowApprovalState:
+    if node.approval_id is None and not node.approval_required:
+        return node.approval_state
+    error_text = _response_error(response).lower()
+    if "expired" in error_text:
+        return WorkflowApprovalState.EXPIRED
+    if "rejected" in error_text:
+        return WorkflowApprovalState.REJECTED
+    return WorkflowApprovalState.FAILED
 
 
 def _retry_allowed(node: WorkflowNode, metadata: object | None) -> bool:

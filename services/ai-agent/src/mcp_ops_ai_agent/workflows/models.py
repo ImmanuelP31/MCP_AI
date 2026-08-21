@@ -34,6 +34,18 @@ class WorkflowNodeStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class WorkflowApprovalState(StrEnum):
+    NOT_REQUIRED = "NOT_REQUIRED"
+    WAITING_APPROVAL = "WAITING_APPROVAL"
+    APPROVED = "APPROVED"
+    EXECUTION_QUEUED = "EXECUTION_QUEUED"
+    EXECUTING = "EXECUTING"
+    SUCCEEDED = "SUCCEEDED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    FAILED = "FAILED"
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -140,6 +152,8 @@ class WorkflowNode(StrictModel):
     last_attempt_at: datetime | None = None
     next_retry_at: datetime | None = None
     result_reference: str | None = Field(default=None, max_length=240)
+    approval_id: UUID | None = None
+    approval_state: WorkflowApprovalState = WorkflowApprovalState.NOT_REQUIRED
     compensation_tool: str | None = Field(default=None, max_length=128)
     policy_evaluation: WorkflowPolicyEvaluation | None = None
     knowledge_references: list[str] = Field(default_factory=list, max_length=20)

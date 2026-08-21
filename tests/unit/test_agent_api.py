@@ -1,4 +1,14 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 from fastapi.testclient import TestClient
+from mcp_ops_api import main as api_main
 from mcp_ops_api.main import app
 
 
@@ -99,6 +109,53 @@ def test_tool_discovery_endpoint_excludes_unauthorized_viewer_operations() -> No
     payload = response.json()
     assert "restart_service" not in [tool["name"] for tool in payload["ranked_tools"]]
     assert payload["filtered_out_unauthorized"] >= 1
+
+
+def test_production_tool_discovery_requires_bearer_identity(
+    monkeypatch: Any,
+) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(api_main.settings, "environment", "production")
+
+    response = client.post(
+        "/api/v1/ai/tool-discovery",
+        json={"query": "Restart SIM-014 service.", "top_k": 8, "role": "ADMIN"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["message"] == "Missing bearer token."
+
+
+def test_production_tool_discovery_uses_jwt_role_not_request_role(
+    monkeypatch: Any,
+) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(api_main.settings, "environment", "production")
+    monkeypatch.setattr(api_main.settings, "jwt_issuer", "https://issuer.example.internal")
+    monkeypatch.setattr(api_main.settings, "jwt_audience", "mcp-engineering-ops")
+    monkeypatch.setattr(api_main.settings, "jwt_secret_key", "enterprise-secret")
+    token = _jwt(
+        {
+            "iss": api_main.settings.jwt_issuer,
+            "aud": api_main.settings.jwt_audience,
+            "sub": "viewer-123",
+            "role": "VIEWER",
+            "principal_type": "HUMAN",
+            "exp": _future_timestamp(),
+        },
+        api_main.settings.jwt_secret_key,
+    )
+
+    response = client.post(
+        "/api/v1/ai/tool-discovery",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "Restart SIM-014 service.", "top_k": 8, "role": "ADMIN"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["role"] == "VIEWER"
+    assert "restart_service" not in [tool["name"] for tool in payload["ranked_tools"]]
 
 
 def test_workflow_plan_endpoint_returns_validated_dag_without_execution() -> None:
@@ -234,3 +291,20 @@ def test_evaluation_latest_endpoint_returns_generated_summary() -> None:
     assert payload["available"] is True
     assert payload["mode"] in {"mock", "real"}
     assert any(summary["config"] == "semantic_rag_graph" for summary in payload["summaries"])
+
+
+def _future_timestamp() -> int:
+    return int((datetime.now(UTC) + timedelta(minutes=5)).timestamp())
+
+
+def _jwt(payload: dict[str, Any], secret: str) -> str:
+    header = {"alg": "HS256", "typ": "JWT"}
+    signing_input = _b64(header) + "." + _b64(payload)
+    signature = hmac.new(secret.encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256)
+    return signing_input + "." + base64.urlsafe_b64encode(signature.digest()).decode().rstrip("=")
+
+
+def _b64(value: dict[str, Any]) -> str:
+    return base64.urlsafe_b64encode(
+        json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii").rstrip("=")

@@ -57,14 +57,18 @@ def test_production_gateway_app_uses_enterprise_authenticator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "enterprise-postgres-secret")
     monkeypatch.setenv("JWT_SECRET_KEY", "enterprise-secret")
+    monkeypatch.setenv("SERVICE_AUTH_SHARED_SECRET", "enterprise-service-secret")
     get_settings.cache_clear()
 
     try:
         app = create_app()
     finally:
         monkeypatch.delenv("ENVIRONMENT", raising=False)
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SERVICE_AUTH_SHARED_SECRET", raising=False)
         get_settings.cache_clear()
 
     assert isinstance(app.state.gateway.authenticator, HmacJwtAuthenticator)
@@ -73,14 +77,20 @@ def test_production_gateway_app_uses_enterprise_authenticator(
 def _settings() -> Settings:
     return Settings(
         environment="production",
+        postgres_password=_test_secret("postgres"),
         jwt_issuer="https://issuer.example.internal",
         jwt_audience="mcp-engineering-ops",
-        jwt_secret_key="enterprise-secret",  # noqa: S106  # nosec B106 - deterministic test secret.
+        jwt_secret_key=_test_secret("jwt"),
+        service_auth_shared_secret=_test_secret("service"),
     )
 
 
 def _future_timestamp() -> int:
     return int((datetime.now(UTC) + timedelta(minutes=5)).timestamp())
+
+
+def _test_secret(name: str) -> str:
+    return f"test-{name}-secret"
 
 
 def _jwt(payload: dict[str, Any], secret: str) -> str:

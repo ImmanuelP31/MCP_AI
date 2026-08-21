@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -23,12 +24,15 @@ from mcp_ops_ai_agent.gateway import gateway_client_from_settings
 from mcp_ops_ai_agent.provider import DeterministicMockProvider, GeminiChatProvider
 from mcp_ops_ai_agent.service import AiEngineeringAgent
 from mcp_ops_ai_agent.tool_discovery import ToolDiscoveryService, evaluate_tool_discovery
+from mcp_ops_ai_agent.workflows.events import WorkflowOutboxEvent
 from mcp_ops_ai_agent.workflows.models import Workflow, WorkflowPlanRequest
 from mcp_ops_ai_agent.workflows.planner import PlannerOutputError, workflow_planner_from_settings
 from mcp_ops_ai_agent.workflows.service import WorkflowNotFoundError, WorkflowPlanningService
 from mcp_ops_ai_agent.workflows.validator import WorkflowValidationError
 from mcp_ops_auth.rbac import Role
 from mcp_ops_common.config import get_settings
+from mcp_ops_mcp_gateway.auth import HmacJwtAuthenticator
+from mcp_ops_mcp_gateway.errors import AuthenticationFailed
 from mcp_ops_observability.fastapi import add_observability
 from mcp_ops_observability.logging import configure_logging
 from pydantic import BaseModel, ConfigDict, Field
@@ -62,9 +66,33 @@ class SqlAlchemyWorkflowStore:
             session.commit()
             return saved
 
+    def save_workflow_with_event(
+        self,
+        workflow: Workflow,
+        event: WorkflowOutboxEvent,
+    ) -> Workflow:
+        with self.session_factory() as session:
+            saved = WorkflowRepository(session).save_workflow_with_event(workflow, event)
+            session.commit()
+            return saved
+
     def get_workflow(self, workflow_id: UUID) -> Workflow | None:
         with self.session_factory() as session:
             return WorkflowRepository(session).get_workflow(workflow_id)
+
+    def pending_workflow_events(self, *, limit: int = 100) -> list[WorkflowOutboxEvent]:
+        with self.session_factory() as session:
+            return WorkflowRepository(session).pending_workflow_events(limit=limit)
+
+    def mark_workflow_event_published(self, event_id: UUID) -> None:
+        with self.session_factory() as session:
+            WorkflowRepository(session).mark_workflow_event_published(event_id)
+            session.commit()
+
+    def mark_workflow_event_failed(self, event_id: UUID, error: str) -> None:
+        with self.session_factory() as session:
+            WorkflowRepository(session).mark_workflow_event_failed(event_id, error)
+            session.commit()
 
 
 workflow_repository = SqlAlchemyWorkflowStore() if settings.environment == "production" else None
@@ -95,7 +123,7 @@ app.add_middleware(
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -116,7 +144,7 @@ class ApiErrorResponse(StrictModel):
 
 class AgentChatRequest(StrictModel):
     message: str = Field(min_length=1, max_length=2000)
-    role: Role
+    role: Role | None = None
 
 
 class AgentChatResponse(StrictModel):
@@ -150,7 +178,7 @@ class ToolDiscoveryRequest(StrictModel):
     query: str = Field(min_length=2, max_length=2000)
     top_k: int = Field(default=8, ge=1, le=50)
     minimum_score: float | None = Field(default=None, ge=0.0, le=1.0)
-    role: Role = Role.ENGINEER
+    role: Role | None = None
     allowed_servers: list[str] = Field(default_factory=list, max_length=20)
     allowed_categories: list[str] = Field(default_factory=list, max_length=20)
 
@@ -175,14 +203,14 @@ class ToolDiscoveryEvaluationResponse(StrictModel):
 
 class WorkflowPlanApiRequest(StrictModel):
     user_request: str = Field(min_length=2, max_length=2000)
-    role: Role = Role.ENGINEER
+    role: Role | None = None
     created_by: str = Field(default="api-user", min_length=1, max_length=160)
     target_environment: str = Field(default="dev", min_length=1, max_length=64)
     top_k: int = Field(default=8, ge=1, le=50)
 
 
 class WorkflowActionRequest(StrictModel):
-    role: Role = Role.ENGINEER
+    role: Role | None = None
 
 
 class WorkflowApiResponse(StrictModel):
@@ -229,7 +257,7 @@ class EvaluationLatestResponse(StrictModel):
 class CapabilityPathApiRequest(StrictModel):
     source: str = Field(min_length=1, max_length=180)
     goal: str = Field(min_length=1, max_length=180)
-    role: Role = Role.ENGINEER
+    role: Role | None = None
     environment: str = Field(default="dev", min_length=1, max_length=64)
     strategy: str = Field(default="policy_compliant", min_length=1, max_length=64)
     disabled_servers: list[str] = Field(default_factory=list, max_length=20)
@@ -241,6 +269,49 @@ ROLE_TOKENS: dict[Role, str] = {
     Role.OPERATOR: "operator-token",
     Role.ADMIN: "admin-token",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class ApiActor:
+    principal_id: str
+    role: Role
+    auth_token: str
+    context_source: str
+
+
+def _resolve_api_actor(
+    http_request: Request,
+    *,
+    requested_role: Role | None = None,
+    requested_created_by: str | None = None,
+) -> ApiActor:
+    if settings.environment in {"staging", "production"}:
+        token = _bearer_token(http_request)
+        try:
+            principal = HmacJwtAuthenticator(settings).authenticate(token)
+        except AuthenticationFailed as exc:
+            raise HTTPException(status_code=401, detail=exc.message) from exc
+        return ApiActor(
+            principal_id=principal.principal_id,
+            role=principal.role,
+            auth_token=token,
+            context_source="authorization_header",
+        )
+    role = requested_role or Role.ENGINEER
+    return ApiActor(
+        principal_id=requested_created_by or "api-user",
+        role=role,
+        auth_token=ROLE_TOKENS[role],
+        context_source="demo_request_body",
+    )
+
+
+def _bearer_token(http_request: Request) -> str:
+    authorization = http_request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    return token.strip()
 
 
 @app.get("/health", tags=["health"])
@@ -287,18 +358,20 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 
 @app.post("/agent/chat", response_model=AgentChatResponse, tags=["agent"])
-def agent_chat(request: AgentChatRequest) -> dict[str, Any]:
+def agent_chat(request: AgentChatRequest, http_request: Request) -> dict[str, Any]:
     """Run the governed LLM agent under the caller's authorization level."""
 
+    actor = _resolve_api_actor(http_request, requested_role=request.role)
     response = agent.handle(
         request.message,
-        user_auth_token=ROLE_TOKENS[request.role],
+        user_auth_token=actor.auth_token,
     )
     payload = response.as_payload()
     payload["authorization"] = {
-        "role": request.role.value,
+        "principal_id": actor.principal_id,
+        "role": actor.role.value,
         "enforcement": "MCP gateway",
-        "context_source": "server-side role mapping",
+        "context_source": actor.context_source,
     }
     return payload
 
@@ -315,12 +388,13 @@ def agent_evaluate() -> dict[str, float | int]:
     response_model=ToolDiscoveryResponse,
     tags=["agent"],
 )
-def ai_tool_discovery(request: ToolDiscoveryRequest) -> dict[str, Any]:
+def ai_tool_discovery(request: ToolDiscoveryRequest, http_request: Request) -> dict[str, Any]:
     """Retrieve a policy-filtered subset of MCP tools for planner context."""
 
+    actor = _resolve_api_actor(http_request, requested_role=request.role)
     response = tool_discovery.retrieve(
         request.query,
-        role=request.role.value,
+        role=actor.role.value,
         top_k=request.top_k,
         minimum_score=request.minimum_score,
         allowed_servers=set(request.allowed_servers),
@@ -345,15 +419,20 @@ def ai_tool_discovery_evaluate(top_k: int = 5) -> dict[str, float | int]:
     response_model=WorkflowApiResponse,
     tags=["workflows"],
 )
-def workflow_plan(request: WorkflowPlanApiRequest) -> dict[str, Any]:
+def workflow_plan(request: WorkflowPlanApiRequest, http_request: Request) -> dict[str, Any]:
     """Plan a typed engineering workflow DAG without executing it."""
 
+    actor = _resolve_api_actor(
+        http_request,
+        requested_role=request.role,
+        requested_created_by=request.created_by,
+    )
     try:
         result = workflow_service.plan(
             WorkflowPlanRequest(
                 user_request=request.user_request,
-                created_by=request.created_by,
-                role=request.role.value,
+                created_by=actor.principal_id,
+                role=actor.role.value,
                 target_environment=request.target_environment,
                 top_k=request.top_k,
             )
@@ -453,11 +532,20 @@ def workflow_get(workflow_id: UUID) -> dict[str, Any]:
     response_model=WorkflowApiResponse,
     tags=["workflows"],
 )
-def workflow_execute(workflow_id: UUID, request: WorkflowActionRequest) -> dict[str, Any]:
+def workflow_execute(
+    workflow_id: UUID,
+    request: WorkflowActionRequest,
+    http_request: Request,
+) -> dict[str, Any]:
     """Execute a previously planned workflow through the governed MCP gateway."""
 
+    actor = _resolve_api_actor(http_request, requested_role=request.role)
     try:
-        workflow = workflow_service.execute(workflow_id, role=request.role.value)
+        workflow = workflow_service.execute(
+            workflow_id,
+            role=actor.role.value,
+            auth_token=actor.auth_token,
+        )
     except WorkflowNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found.") from exc
     return {
@@ -471,11 +559,20 @@ def workflow_execute(workflow_id: UUID, request: WorkflowActionRequest) -> dict[
     response_model=WorkflowApiResponse,
     tags=["workflows"],
 )
-def workflow_resume(workflow_id: UUID, request: WorkflowActionRequest) -> dict[str, Any]:
+def workflow_resume(
+    workflow_id: UUID,
+    request: WorkflowActionRequest,
+    http_request: Request,
+) -> dict[str, Any]:
     """Resume workflow execution from the latest persisted checkpoint."""
 
+    actor = _resolve_api_actor(http_request, requested_role=request.role)
     try:
-        workflow = workflow_service.resume(workflow_id, role=request.role.value)
+        workflow = workflow_service.resume(
+            workflow_id,
+            role=actor.role.value,
+            auth_token=actor.auth_token,
+        )
     except WorkflowNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found.") from exc
     return {
@@ -493,11 +590,18 @@ def workflow_retry_node(
     workflow_id: UUID,
     node_id: str,
     request: WorkflowActionRequest,
+    http_request: Request,
 ) -> dict[str, Any]:
     """Retry one workflow node without replanning or restarting completed nodes."""
 
+    actor = _resolve_api_actor(http_request, requested_role=request.role)
     try:
-        workflow = workflow_service.retry_node(workflow_id, node_id, role=request.role.value)
+        workflow = workflow_service.retry_node(
+            workflow_id,
+            node_id,
+            role=actor.role.value,
+            auth_token=actor.auth_token,
+        )
     except WorkflowNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Workflow or node not found.") from exc
     return {
@@ -513,13 +617,17 @@ def workflow_retry_node(
 )
 def workflow_cancel(
     workflow_id: UUID,
+    http_request: Request,
     request: WorkflowActionRequest | None = None,
 ) -> dict[str, Any]:
     """Cancel a planned or running workflow."""
 
+    actor = _resolve_api_actor(
+        http_request,
+        requested_role=request.role if request is not None else None,
+    )
     try:
-        role = request.role.value if request is not None else Role.ENGINEER.value
-        workflow = workflow_service.cancel(workflow_id, role=role)
+        workflow = workflow_service.cancel(workflow_id, role=actor.role.value)
     except WorkflowNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found.") from exc
     return {"ok": True, "workflow": workflow.model_dump(mode="json")}
@@ -533,14 +641,15 @@ def capability_graph_snapshot() -> dict[str, Any]:
 
 
 @app.post("/api/v1/capabilities/path", tags=["capabilities"])
-def capability_path(request: CapabilityPathApiRequest) -> dict[str, Any]:
+def capability_path(request: CapabilityPathApiRequest, http_request: Request) -> dict[str, Any]:
     """Find a valid capability path between engineering resources and goals."""
 
+    actor = _resolve_api_actor(http_request, requested_role=request.role)
     path = capability_graph.find_path(
         CapabilityPathRequest(
             source=request.source,
             goal=request.goal,
-            role=request.role.value,
+            role=actor.role.value,
             environment=request.environment,
             strategy=request.strategy,
             disabled_servers=request.disabled_servers,

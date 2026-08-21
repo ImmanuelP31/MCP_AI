@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TypeVar
 
+from mcp_ops_ai_agent.workflows.events import WorkflowOutboxEvent
 from mcp_ops_ai_agent.workflows.models import (
     ArgumentReference,
     RetryStrategy,
     Workflow,
+    WorkflowApprovalState,
     WorkflowAuditEvent,
     WorkflowCondition,
     WorkflowEdge,
@@ -30,6 +34,7 @@ from mcp_ops_api.db.models import (
     TicketModel,
     ToolExecutionModel,
     WorkflowEdgeModel,
+    WorkflowEventOutboxModel,
     WorkflowModel,
     WorkflowNodeModel,
 )
@@ -196,22 +201,20 @@ class WorkflowRepository(Repository[WorkflowModel]):
         super().__init__(session, WorkflowModel)
 
     def save_workflow(self, workflow: Workflow) -> Workflow:
-        model = WorkflowModel(
-            id=workflow.id,
-            version=workflow.version,
-            user_request=workflow.user_request,
-            status=workflow.status.value,
-            created_by=workflow.created_by,
-            created_at=workflow.created_at,
-            updated_at=workflow.created_at,
-            target_environment=workflow.target_environment,
-            planner_model=workflow.planner_model,
-            confidence=workflow.confidence,
-            original_plan=workflow.original_plan,
-            policy_transformed_plan=workflow.policy_transformed_plan,
-            audit_events=[event.model_dump(mode="json") for event in workflow.audit_events],
-        )
-        model.nodes = [
+        existing = self.session.get(WorkflowModel, workflow.id)
+        model = existing or WorkflowModel(id=workflow.id, created_at=workflow.created_at)
+        model.version = workflow.version
+        model.user_request = workflow.user_request
+        model.status = workflow.status.value
+        model.created_by = workflow.created_by
+        model.updated_at = workflow.created_at
+        model.target_environment = workflow.target_environment
+        model.planner_model = workflow.planner_model
+        model.confidence = Decimal(str(workflow.confidence))
+        model.original_plan = workflow.original_plan
+        model.policy_transformed_plan = workflow.policy_transformed_plan
+        model.audit_events = [event.model_dump(mode="json") for event in workflow.audit_events]
+        node_models = [
             WorkflowNodeModel(
                 workflow_id=workflow.id,
                 node_key=node.id,
@@ -240,6 +243,8 @@ class WorkflowRepository(Repository[WorkflowModel]):
                 last_attempt_at=node.last_attempt_at,
                 next_retry_at=node.next_retry_at,
                 result_reference=node.result_reference,
+                approval_id=node.approval_id,
+                approval_state=node.approval_state.value,
                 compensation_tool=node.compensation_tool,
                 policy_evaluation=node.policy_evaluation.model_dump(mode="json")
                 if node.policy_evaluation
@@ -248,7 +253,7 @@ class WorkflowRepository(Repository[WorkflowModel]):
             )
             for node in workflow.nodes
         ]
-        model.edges = [
+        edge_models = [
             WorkflowEdgeModel(
                 workflow_id=workflow.id,
                 source_node=edge.source,
@@ -257,7 +262,6 @@ class WorkflowRepository(Repository[WorkflowModel]):
             )
             for edge in workflow.edges
         ]
-        existing = self.session.get(WorkflowModel, workflow.id)
         if existing is not None:
             self.session.execute(
                 delete(WorkflowNodeModel).where(WorkflowNodeModel.workflow_id == workflow.id)
@@ -265,11 +269,75 @@ class WorkflowRepository(Repository[WorkflowModel]):
             self.session.execute(
                 delete(WorkflowEdgeModel).where(WorkflowEdgeModel.workflow_id == workflow.id)
             )
-            self.session.delete(existing)
             self.session.flush()
-        self.session.add(model)
+            self.session.expire(model, ["nodes", "edges"])
+            self.session.add_all(node_models)
+            self.session.add_all(edge_models)
+        else:
+            model.nodes = node_models
+            model.edges = edge_models
+            self.session.add(model)
         self.session.flush()
         return workflow
+
+    def save_workflow_with_event(
+        self,
+        workflow: Workflow,
+        event: WorkflowOutboxEvent,
+    ) -> Workflow:
+        saved = self.save_workflow(workflow)
+        existing = self.session.scalar(
+            select(WorkflowEventOutboxModel).where(
+                WorkflowEventOutboxModel.event_id == event.event_id
+            )
+        )
+        if existing is None:
+            self.session.add(
+                WorkflowEventOutboxModel(
+                    event_id=event.event_id,
+                    aggregate_id=event.aggregate_id,
+                    event_type=event.event_type,
+                    source=event.source,
+                    correlation_id=event.correlation_id,
+                    schema_version=event.schema_version,
+                    payload=event.payload,
+                    status="PENDING",
+                    attempts=0,
+                )
+            )
+            self.session.flush()
+        return saved
+
+    def pending_workflow_events(self, *, limit: int = 100) -> list[WorkflowOutboxEvent]:
+        statement = (
+            select(WorkflowEventOutboxModel)
+            .where(WorkflowEventOutboxModel.status.in_(["PENDING", "FAILED"]))
+            .order_by(WorkflowEventOutboxModel.created_at)
+            .limit(_limit(limit))
+        )
+        return [_outbox_event_from_model(model) for model in self.session.scalars(statement).all()]
+
+    def mark_workflow_event_published(self, event_id: uuid.UUID) -> None:
+        model = self.session.scalar(
+            select(WorkflowEventOutboxModel).where(WorkflowEventOutboxModel.event_id == event_id)
+        )
+        if model is None:
+            return
+        model.status = "PUBLISHED"
+        model.published_at = datetime.now(UTC)
+        model.last_error = None
+        self.session.flush()
+
+    def mark_workflow_event_failed(self, event_id: uuid.UUID, error: str) -> None:
+        model = self.session.scalar(
+            select(WorkflowEventOutboxModel).where(WorkflowEventOutboxModel.event_id == event_id)
+        )
+        if model is None:
+            return
+        model.status = "FAILED"
+        model.attempts += 1
+        model.last_error = error[:500]
+        self.session.flush()
 
     def get_workflow(self, workflow_id: uuid.UUID) -> Workflow | None:
         statement = (
@@ -341,6 +409,8 @@ def _workflow_from_model(model: WorkflowModel) -> Workflow:
                 last_attempt_at=node.last_attempt_at,
                 next_retry_at=node.next_retry_at,
                 result_reference=node.result_reference,
+                approval_id=node.approval_id,
+                approval_state=WorkflowApprovalState(node.approval_state),
                 compensation_tool=node.compensation_tool,
                 policy_evaluation=WorkflowPolicyEvaluation.model_validate_json(
                     json.dumps(node.policy_evaluation)
@@ -368,4 +438,17 @@ def _workflow_from_model(model: WorkflowModel) -> Workflow:
             WorkflowAuditEvent.model_validate_json(json.dumps(event))
             for event in model.audit_events
         ],
+    )
+
+
+def _outbox_event_from_model(model: WorkflowEventOutboxModel) -> WorkflowOutboxEvent:
+    return WorkflowOutboxEvent(
+        event_id=model.event_id,
+        event_type=model.event_type,
+        aggregate_id=model.aggregate_id,
+        payload=model.payload,
+        created_at=model.created_at,
+        correlation_id=model.correlation_id,
+        source=model.source,
+        schema_version=model.schema_version,
     )

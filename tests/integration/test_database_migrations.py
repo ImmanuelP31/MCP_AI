@@ -30,6 +30,7 @@ EXPECTED_TABLES = {
     "workflows",
     "workflow_nodes",
     "workflow_edges",
+    "workflow_event_outbox",
 }
 
 
@@ -47,6 +48,8 @@ def test_alembic_migration_builds_domain_schema_from_empty_database() -> None:
     assert {"id", "version", "created_at", "updated_at", "device_id", "status"}.issubset(
         devices_columns
     )
+    workflow_node_columns = {column["name"] for column in inspector.get_columns("workflow_nodes")}
+    assert {"approval_id", "approval_state"}.issubset(workflow_node_columns)
 
 
 def test_alembic_upgrade_head_can_be_applied_repeatedly() -> None:
@@ -75,6 +78,12 @@ def test_high_volume_indexes_exist_after_migration() -> None:
     assert _index_exists(inspector, "audit_logs", "idx_audit_logs_actor_timestamp")
     assert _index_exists(inspector, "audit_logs", "idx_audit_logs_device_timestamp")
     assert _index_exists(inspector, "tool_executions", "idx_tool_executions_tool_timestamp")
+    assert _index_exists(
+        inspector,
+        "workflow_event_outbox",
+        "idx_workflow_event_outbox_status_created_at",
+    )
+    assert _index_exists(inspector, "workflow_nodes", "idx_workflow_nodes_approval_id")
 
 
 def _alembic_config(database_url: str) -> Config:
