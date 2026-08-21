@@ -76,6 +76,8 @@ class EvaluationRunResult:
     mode: str
     generated_at: str
     dataset_path: str
+    provider_evaluation: str
+    pace_seconds: float
     summaries: list[dict[str, Any]]
     cases: list[dict[str, Any]]
 
@@ -139,7 +141,13 @@ def run_evaluation(
     output: bool = True,
     mode: str = "mock",
     dataset_name: str = "synthetic",
+    provider_evaluation: str = "planner_quality",
+    pace_seconds: float | None = None,
 ) -> EvaluationRunResult:
+    if provider_evaluation not in {"planner_quality", "circuit_breaker"}:
+        raise ValueError(
+            "provider_evaluation must be 'planner_quality' or 'circuit_breaker'."
+        )
     dataset = _load_dataset(dataset_name)
     dataset_path = _dataset_path(dataset_name)
     if limit is not None:
@@ -156,6 +164,11 @@ def run_evaluation(
 
     case_results: list[EvaluationCaseResult] = []
     summaries: list[dict[str, Any]] = []
+    effective_pace_seconds = _effective_pace_seconds(
+        mode=mode,
+        provider_evaluation=provider_evaluation,
+        pace_seconds=pace_seconds,
+    )
     for config in configs:
         metric_inputs: list[MetricInputs] = []
         runtime_error: Exception | None = None
@@ -164,7 +177,9 @@ def run_evaluation(
             runtime = _build_runtime(config, mode=mode)
         except Exception as exc:  # noqa: BLE001 - configuration failures are benchmark data.
             runtime_error = exc
-        for item in dataset:
+        for case_index, item in enumerate(dataset):
+            if case_index > 0 and effective_pace_seconds > 0:
+                time.sleep(effective_pace_seconds)
             if runtime is None:
                 case_result, metric_input = _failed_case_result(
                     item,
@@ -173,6 +188,8 @@ def run_evaluation(
                     error=runtime_error or RuntimeError("evaluation runtime unavailable"),
                 )
             else:
+                if mode == "real" and provider_evaluation == "planner_quality":
+                    _reset_provider_state(runtime.service)
                 case_result, metric_input = _evaluate_case(
                     item,
                     config,
@@ -189,12 +206,35 @@ def run_evaluation(
         mode=mode,
         generated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         dataset_path=_display_path(dataset_path),
+        provider_evaluation=provider_evaluation,
+        pace_seconds=effective_pace_seconds,
         summaries=summaries,
         cases=[asdict(result) for result in case_results],
     )
     if output:
         _write_outputs(payload)
     return payload
+
+
+def _effective_pace_seconds(
+    *,
+    mode: str,
+    provider_evaluation: str,
+    pace_seconds: float | None,
+) -> float:
+    if pace_seconds is not None:
+        return max(0.0, float(pace_seconds))
+    if mode == "real" and provider_evaluation == "planner_quality":
+        return 2.0
+    return 0.0
+
+
+def _reset_provider_state(service: WorkflowPlanningService) -> None:
+    planner = getattr(service, "planner", None)
+    client = getattr(planner, "client", None)
+    reset = getattr(client, "reset_provider_state", None)
+    if callable(reset):
+        reset()
 
 
 def _build_runtime(config: EvaluationConfig, *, mode: str) -> _EvaluationRuntime:
@@ -559,11 +599,16 @@ def _write_outputs(payload: EvaluationRunResult) -> None:
                 "planner_latency_ms",
                 "end_to_end_latency_ms",
                 "mode",
+                "provider_evaluation",
+                "pace_seconds",
             ],
         )
         writer.writeheader()
         for summary in payload.summaries:
-            writer.writerow({key: summary.get(key) for key in writer.fieldnames})
+            row = {key: summary.get(key) for key in writer.fieldnames}
+            row["provider_evaluation"] = payload.provider_evaluation
+            row["pace_seconds"] = payload.pace_seconds
+            writer.writerow(row)
     REPORT_PATH.write_text(render_markdown_report(payload), encoding="utf-8")
 
 

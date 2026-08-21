@@ -1,8 +1,10 @@
 # AI Engineering Workflow Evaluation Report
 
-Generated: `2026-08-18T10:42:30Z`
+Generated: `2026-08-20T22:45:13Z`
 Mode: `real`
 Dataset: `evaluation/datasets/heldout_adversarial_engineering_tasks.json`
+Provider evaluation: `planner_quality`
+Pace seconds: `7.0`
 
 These results are deterministic/mock when `mode=mock`. They should not be presented as live LLM quality measurements.
 
@@ -10,7 +12,7 @@ These results are deterministic/mock when `mode=mock`. They should not be presen
 
 | Config | Attempted | Provider OK | Provider Success | Quality Validity | Plan Accepted | Tool Recall | Tool Precision | Unexpected Tools | Unknown Calls | Unknown Cases | E2E Validity |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| semantic_rag_graph | 50 | 34 | 0.6800 | 0.9118 | 0.8235 | 0.3358 | 0.3309 | 0.5283 | 0.0000 | 0.0000 | 0.6200 |
+| semantic_rag_graph | 50 | 0 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
 
 Quality metrics use provider-successful cases only. End-to-end metrics include provider availability failures.
 `Plan Accepted` means the planned workflow satisfied benchmark policy/approval expectations. It is not tool execution success unless the benchmark explicitly runs execution.
@@ -20,19 +22,15 @@ Quality metrics use provider-successful cases only. End-to-end metrics include p
 
 | Category | Cases |
 | --- | ---: |
-| PROVIDER_FAILURE | 16 |
-| WORKFLOW_VALIDATION_FAILURE | 3 |
+| PROVIDER_FAILURE | 50 |
 
 ## Failure Taxonomy
 
 | Error Stage | Error Reason | Cases |
 | --- | --- | ---: |
-| provider_http | HTTP 429 | 16 |
-| workflow_validation | invalid_arguments: Missing required arguments: device_id. | 1 |
-| workflow_validation | invalid_arguments: Missing required arguments: run_id.; invalid_arguments: Missing required arguments: job_id. | 1 |
-| workflow_validation | invalid_arguments: Missing required arguments: run_id.; invalid_arguments: Missing required arguments: job_id.; invalid_arguments: Missing required arguments: device_id. | 1 |
+| provider_http | HTTP 429 | 50 |
 
-Retry attempts recorded: 0
+Retry attempts recorded: 50
 Provider finish reasons: none recorded
 
 ## Interpretation Guardrails

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from evaluation.runner import run_evaluation
+from evaluation.runner import run_evaluation, run_execution_benchmark
 from evaluation.scenarios import config_by_name, evaluation_configs
 
 
@@ -32,7 +32,43 @@ def main() -> None:
         choices=["synthetic", "heldout_adversarial"],
         help="Benchmark dataset to evaluate.",
     )
+    parser.add_argument(
+        "--provider-evaluation",
+        default="planner_quality",
+        choices=["planner_quality", "circuit_breaker"],
+        help=(
+            "planner_quality resets provider circuit state between cases; "
+            "circuit_breaker preserves cross-case provider state."
+        ),
+    )
+    parser.add_argument(
+        "--pace-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Optional delay between provider-backed cases. Real planner-quality "
+            "runs default to 2 seconds when this is omitted."
+        ),
+    )
+    parser.add_argument(
+        "--execution-benchmark",
+        action="store_true",
+        help=(
+            "Run the deterministic MCP execution benchmark instead of the planner-quality "
+            "benchmark."
+        ),
+    )
     args = parser.parse_args()
+    if args.execution_benchmark:
+        execution_result = run_execution_benchmark(limit=args.limit)
+        summary = execution_result.summary
+        print(
+            "execution: cases={cases} planning={planning_success_rate:.3f} "
+            "policy={policy_correctness_rate:.3f} approval={approval_correctness_rate:.3f} "
+            "execution={execution_success_rate:.3f} final_state={final_state_correctness_rate:.3f}"
+            .format(**summary)
+        )
+        return
     configs = (
         evaluation_configs()
         if args.config == "all"
@@ -43,6 +79,8 @@ def main() -> None:
         limit=args.limit,
         mode=args.mode,
         dataset_name=args.dataset,
+        provider_evaluation=args.provider_evaluation,
+        pace_seconds=args.pace_seconds,
     )
     for summary in result.summaries:
         message = (

@@ -12,7 +12,8 @@ from evaluation.metrics import (
     precision,
     recall,
 )
-from evaluation.runner import run_evaluation
+from evaluation.runner import run_evaluation, run_execution_benchmark
+from evaluation.runner.execution import execution_benchmark_items
 from evaluation.scenarios import config_by_name
 
 
@@ -57,6 +58,22 @@ def test_heldout_adversarial_dataset_can_be_selected_by_runner() -> None:
     assert len(result.cases) == 2
     assert result.cases[0]["id"] == "HELDOUT-001"
     assert result.cases[0]["category"] == "heldout adversarial"
+    assert result.provider_evaluation == "planner_quality"
+    assert result.pace_seconds == 0.0
+
+
+def test_runner_records_circuit_breaker_evaluation_mode() -> None:
+    result = run_evaluation(
+        selected_configs=(config_by_name("semantic_rag_graph"),),
+        dataset_name="heldout_adversarial",
+        limit=1,
+        output=False,
+        provider_evaluation="circuit_breaker",
+        pace_seconds=0.25,
+    )
+
+    assert result.provider_evaluation == "circuit_breaker"
+    assert result.pace_seconds == 0.25
 
 
 def test_precision_recall_exact_accuracy_and_mrr_are_computed() -> None:
@@ -208,3 +225,26 @@ def test_unknown_tool_metrics_distinguish_call_rate_from_case_rate() -> None:
     assert summary.unknown_or_disallowed_tool_rate == 0.6667
     assert summary.cases_with_unknown_tools_rate == 1.0
     assert summary.unknown_or_disallowed_tools_per_case == 2.0
+
+
+def test_execution_benchmark_covers_policy_approval_retry_and_compensation() -> None:
+    items = execution_benchmark_items()
+
+    assert len(items) >= 5
+    assert any(item.required_approvals for item in items)
+    assert any(item.expected_retried_tools for item in items)
+    assert any(item.expected_compensated_tools for item in items)
+
+
+def test_execution_benchmark_runs_mcp_tools_and_checks_final_state() -> None:
+    result = run_execution_benchmark(output=False)
+
+    assert result.summary["cases"] == 5
+    assert result.summary["planning_success_rate"] == 1.0
+    assert result.summary["policy_correctness_rate"] == 1.0
+    assert result.summary["approval_correctness_rate"] == 1.0
+    assert result.summary["execution_success_rate"] == 1.0
+    assert result.summary["retry_recovery_rate"] == 1.0
+    assert result.summary["compensation_success_rate"] == 1.0
+    assert result.summary["final_state_correctness_rate"] == 1.0
+    assert any(case["tool_attempts"].get("run_tests") == 2 for case in result.cases)

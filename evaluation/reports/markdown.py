@@ -10,6 +10,8 @@ def render_markdown_report(payload: Any) -> str:
         f"Generated: `{payload.generated_at}`",
         f"Mode: `{payload.mode}`",
         f"Dataset: `{payload.dataset_path}`",
+        f"Provider evaluation: `{getattr(payload, 'provider_evaluation', 'planner_quality')}`",
+        f"Pace seconds: `{getattr(payload, 'pace_seconds', 0.0)}`",
         "",
         (
             "These results are deterministic/mock when `mode=mock`. They should not be "

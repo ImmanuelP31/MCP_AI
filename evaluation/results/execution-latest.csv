@@ -1,0 +1,2 @@
+cases,planning_success_rate,policy_correctness_rate,approval_correctness_rate,execution_success_rate,compensation_success_rate,retry_recovery_rate,final_state_correctness_rate,average_planner_latency_ms,average_execution_latency_ms
+5,1.0,1.0,1.0,1.0,1.0,1.0,1.0,44.8156,80.819
